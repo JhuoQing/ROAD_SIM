@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<title>道路車流模擬器</title>
+<style>
+/*CSS*/
+</style>
+</head>
+<body>
+<div id="app">
+  <header id="top">
+    <div class="brand">
+      <svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><rect x="2" y="2" width="26" height="26" rx="8" fill="#fff" stroke="#2b2440" stroke-width="2.5"/><path d="M15 5v20M5 15h20" stroke="#4f566b" stroke-width="7"/><path d="M15 5v20M5 15h20" stroke="#fff" stroke-width="1" stroke-dasharray="2 2.5"/><rect x="11" y="11" width="8" height="8" rx="2" fill="#ff6b57" stroke="#2b2440" stroke-width="2"/></svg>
+      <span>ROAD·SIM<small>道路車流模擬</small></span>
+    </div>
+    <select id="tplSel" title="載入範例路網" aria-label="範例路網">
+      <option value="">範例路網…</option>
+      <option value="cross">十字路口（含號誌）</option>
+      <option value="crossL">十字路口（左轉專用相位）</option>
+      <option value="t">T 字路口（無號誌）</option>
+      <option value="bottle">瓶頸（3 車道 → 1 車道）</option>
+      <option value="grid">2×2 路網（含號誌）</option>
+      <option value="blank">空白畫布</option>
+    </select>
+    <button class="btn icon" id="undoBtn" title="復原 (Ctrl+Z)" aria-label="復原">↶</button>
+    <button class="btn icon" id="redoBtn" title="重做 (Ctrl+Shift+Z)" aria-label="重做">↷</button>
+    <span class="sep"></span>
+    <button class="btn primary" id="playBtn" title="播放／暫停 (空白鍵)" style="min-width:78px;justify-content:center">暫停</button>
+    <button class="btn" id="stepBtn" title="前進 1 秒 (.)">單步</button>
+    <button class="btn" id="resetBtn" title="重新開始模擬（保留路網）">重置</button>
+    <select id="speedSel" title="模擬速度 ([ ])" aria-label="模擬速度">
+      <option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="5">5×</option><option value="10">10×</option>
+    </select>
+    <span class="clock num" id="clock">00:00</span>
+    <span class="eff num" id="eff"></span>
+    <span class="grow"></span>
+    <button class="btn" id="saveBtn">存檔／載入</button>
+    <button class="btn" id="helpBtn" aria-label="說明">?</button>
+    <button class="btn" id="drawerBtn">面板</button>
+  </header>
+
+  <aside id="tools">
+    <div class="group">
+      <h3>工具</h3>
+      <button class="tool on" data-tool="select"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3l14 8-6 2-2 6z"/></svg>選取／移動<kbd>V</kbd></button>
+      <button class="tool" data-tool="draw"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20L20 4M4 20l-1 1M16 4h4v4"/></svg>畫路<kbd>R</kbd></button>
+      <button class="tool" data-tool="signal"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="2" width="8" height="20" rx="3"/><circle cx="12" cy="7" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="17" r="1.4"/></svg>號誌<kbd>S</kbd></button>
+      <button class="tool" data-tool="delete"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>刪除<kbd>X</kbd></button>
+    </div>
+    <div class="group" id="roadOpts">
+      <h3>新道路屬性</h3>
+      <div class="field"><label>每向車道</label><div class="seg" id="newLanes"><button data-v="1" class="on">1</button><button data-v="2">2</button><button data-v="3">3</button></div></div>
+      <div class="field"><label>速限</label><select id="newLimit"><option>30</option><option>40</option><option selected>50</option><option>60</option><option>70</option><option>80</option><option>100</option></select></div>
+      <label class="chk"><input type="checkbox" id="newOneway">單向道路</label>
+    </div>
+    <div class="group" id="viewOpts">
+      <h3>顯示</h3>
+      <div class="field"><label>車輛顏色</label><select id="colorSel"><option value="speed">依車速</option><option value="type">依車種</option></select></div>
+      <div class="field"><label>路面疊圖</label><select id="overlaySel"><option value="none">無</option><option value="speed">相對車速</option><option value="dens">車流密度</option></select></div>
+      <label class="chk"><input type="checkbox" id="timerChk" checked>顯示號誌倒數秒數</label>
+      <label class="chk"><input type="checkbox" id="arrowChk" checked>顯示車道箭頭（放大後）</label>
+      <div class="legend"><span>慢／密</span><i></i><span>快／疏</span></div>
+    </div>
+  </aside>
+
+  <main id="stage">
+    <canvas id="cv"></canvas>
+    <div id="hud"></div>
+    <div id="empty"><div>目前沒有道路<br>選左側「畫路」開始畫，或從上方載入「範例路網」</div></div>
+    <button class="btn primary" id="finish">完成這條路 (Enter)</button>
+    <div id="zoom">
+      <button class="btn icon" id="zIn" aria-label="放大">＋</button>
+      <button class="btn icon" id="zOut" aria-label="縮小">－</button>
+      <button class="btn icon" id="zFit" title="全景 (F)" aria-label="適配畫面">⛶</button>
+    </div>
+    <div id="toast"></div>
+  </main>
+
+  <aside id="side">
+    <div id="insp"></div>
+    <div class="card">
+      <h3>交通需求（全域）</h3>
+      <div class="rng"><label>入口流量</label><input type="range" id="rFlow" min="0" max="1500" step="25"><output id="oFlow"></output></div>
+      <div class="hint" style="margin:-4px 0 6px">每個入口每小時產生的車輛數，單位 veh/h；可在選取入口時單獨覆寫。</div>
+      <div class="rng"><label>貨車比例</label><input type="range" id="rTruck" min="0" max="40" step="1"><output id="oTruck"></output></div>
+      <div class="rng"><label>左轉權重</label><input type="range" id="rL" min="0" max="100" step="5"><output id="oL"></output></div>
+      <div class="rng"><label>直行權重</label><input type="range" id="rS" min="0" max="100" step="5"><output id="oS"></output></div>
+      <div class="rng"><label>右轉權重</label><input type="range" id="rR" min="0" max="100" step="5"><output id="oR"></output></div>
+      <div class="field"><label>隨機種子</label><div style="display:flex;gap:6px"><input type="number" id="seed" min="1" max="999999" step="1" style="width:100%"><button class="btn" id="seedBtn">重開</button></div></div>
+    </div>
+    <div class="card">
+      <h3>模擬說明</h3>
+      <div class="hint">車流為微觀模型：每輛車以 IDM 跟車、可換車道，路口依號誌或讓行規則通過。道路兩端（只連一條路的端點）是入口／出口。右側行車。修改路網會讓模擬重新開始。</div>
+    </div>
+  </aside>
+
+  <div id="dock">
+    <section>
+      <div class="dockhead"><h3>即時指標</h3><span class="hint num" id="kpiNote"></span></div>
+      <div class="kpis">
+        <div class="kpi"><span>路網車輛</span><b id="kN">0</b></div>
+        <div class="kpi"><span>平均車速</span><b id="kV">0<small>km/h</small></b></div>
+        <div class="kpi"><span>通過量</span><b id="kT">0<small>veh/h</small></b></div>
+        <div class="kpi"><span>平均延滯</span><b id="kD">0<small>s</small></b></div>
+        <div class="kpi"><span>平均旅行時間</span><b id="kTT">0<small>s</small></b></div>
+        <div class="kpi"><span>入口待進車輛</span><b id="kQ">0</b></div>
+      </div>
+    </section>
+    <section class="chartsec">
+      <div class="dockhead"><h3>時間序列</h3></div>
+      <div class="tabs" id="metricTabs">
+        <button data-m="v" class="on">平均車速</button><button data-m="thr">通過量</button><button data-m="delay">平均延滯</button><button data-m="n">路網車輛</button><button data-m="vq">待進車輛</button>
+      </div>
+      <div class="chartwrap"><canvas id="chart"></canvas></div>
+    </section>
+    <section>
+      <div class="dockhead"><h3>路口績效</h3><span class="hint">LOS 依平均控制延滯</span></div>
+      <table>
+        <thead><tr><th>路口</th><th>流量 veh/h</th><th>延滯 s</th><th>服務水準</th><th>最大排隊 m</th></tr></thead>
+        <tbody id="nodeTbl"></tbody>
+      </table>
+      <div class="hint" id="nodeEmpty" style="display:none;margin-top:8px">尚無三向以上的路口。</div>
+    </section>
+  </div>
+</div>
+
+<div class="modal" id="saveModal">
+  <div class="sheet">
+    <h2>存檔／載入</h2>
+    <div class="hint">此環境無法直接下載檔案：請按「複製」把內容貼到自己的記事本存成 .json；要載入時貼回下方文字框按「載入」，或選擇檔案。路網也會自動暫存在這個瀏覽器。</div>
+    <div class="row">
+      <button class="btn primary" id="svGen">產生目前路網</button>
+      <button class="btn" id="svCopy">複製</button>
+      <button class="btn" id="svLoad">載入文字框內容</button>
+      <label class="btn" style="cursor:pointer">選擇檔案…<input type="file" id="svFile" accept=".json,application/json,text/plain" hidden></label>
+      <button class="btn" id="svCsv">產生指標 CSV</button>
+    </div>
+    <textarea id="svText" rows="12" spellcheck="false" placeholder="在此貼上路網 JSON…"></textarea>
+    <div class="hint" id="svMsg" style="margin-top:8px"></div>
+    <div class="row" style="justify-content:flex-end"><button class="btn" data-close>關閉</button></div>
+  </div>
+</div>
+
+<div class="modal" id="helpModal">
+  <div class="sheet">
+    <h2>操作說明</h2>
+    <div class="keys">
+      <kbd>V / R / S / X</kbd><span>選取、畫路、號誌、刪除</span>
+      <kbd>畫路</kbd><span>點一下設起點，再點下一點；雙擊、Enter 或右鍵結束。靠近既有道路會自動接上並切出路口，交叉的道路會自動成為路口。</span>
+      <kbd>Shift</kbd><span>畫路時按住，角度吸附 15°</span>
+      <kbd>滾輪／雙指</kbd><span>縮放；拖曳空白處（或中鍵／右鍵拖曳）平移</span>
+      <kbd>選取</kbd><span>點道路或節點看屬性；拖曳節點可移動；入口可單獨設定流量；路口可開關號誌並調整時制</span>
+      <kbd>號誌</kbd><span>選取路口後可設定 A／B 兩個方向軸的直行綠燈、左轉專用、右轉專用相位與黃燈／全紅；紅燈（含右轉）車輛一律停等，不會闖紅燈。畫面放大後會在車道上顯示白色方向箭頭。</span>
+      <kbd>空白鍵</kbd><span>播放／暫停</span>
+      <kbd>.</kbd><span>前進 1 秒</span>
+      <kbd>[ ]</kbd><span>調整模擬速度</span>
+      <kbd>F</kbd><span>全景</span>
+      <kbd>Ctrl+Z</kbd><span>復原（Ctrl+Shift+Z 重做）</span>
+      <kbd>Delete</kbd><span>刪除選取物件</span>
+    </div>
+    <div class="hint">指標說明：延滯＝實際旅行時間減去以速限行駛的時間；LOS 依路口平均控制延滯分級（A 最順暢，F 壅塞）。通過量為最近 60 秒離開路網的車輛數換算成每小時。</div>
+    <div class="row" style="justify-content:flex-end"><button class="btn primary" data-close>開始玩</button></div>
+  </div>
+</div>
+
+<script>
+/*SIM*/
+</script>
+<script>
+/*APP*/
+</script>
+</body>
+</html>
