@@ -59,7 +59,8 @@ h3::before{content:"";width:10px;height:10px;border-radius:3px;background:var(--
 .tool kbd{margin-left:auto;font:700 11px var(--mono);color:var(--muted);border:2px solid var(--line2);border-radius:6px;padding:0 5px;background:#fff}
 .tool.on kbd{color:var(--ink);border-color:var(--ink)}
 .field{display:grid;grid-template-columns:82px 1fr;gap:6px 8px;align-items:center;margin:8px 0}
-.field>label{color:var(--muted);font-weight:600}
+.field>label,.field>span{color:var(--muted);font-weight:600}
+.row .field{display:grid;grid-template-columns:44px 1fr;margin:0}
 .seg{display:flex;border:2px solid var(--ink);border-radius:10px;overflow:hidden;background:#fff}
 .seg button{flex:1;height:30px;border:0;background:#fff;border-right:2px solid var(--ink);font-weight:700}
 .seg button:last-child{border-right:0}
@@ -85,6 +86,9 @@ input[type=range]{width:100%;accent-color:var(--coral);margin:0}
 #hud{position:absolute;left:12px;top:12px;max-width:min(540px,70%);padding:8px 12px;border-radius:12px;background:#fffdf6ee;border:2px solid var(--ink);box-shadow:var(--pop);color:var(--muted);font-size:12px;pointer-events:none}
 #hud b{color:var(--ink)}
 #cv{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:default}
+#attrib{position:absolute;left:10px;bottom:8px;font-size:11px;background:#fffdf6cc;border:1px solid var(--line2);border-radius:6px;padding:1px 6px;display:none}
+#attrib a{color:var(--muted);text-decoration:none}
+#attrib a:hover{text-decoration:underline}
 #zoom{position:absolute;right:12px;bottom:12px;display:flex;flex-direction:column;gap:8px}
 #finish{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);display:none}
 #toast{position:absolute;left:50%;top:14px;transform:translate(-50%,-8px);padding:8px 16px;border-radius:99px;background:var(--ink);color:#fff;font-weight:600;opacity:0;transition:.2s;pointer-events:none;z-index:4;white-space:nowrap}

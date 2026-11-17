@@ -68,7 +68,8 @@ h3::before{content:"";width:10px;height:10px;border-radius:3px;background:var(--
 .tool kbd{margin-left:auto;font:700 11px var(--mono);color:var(--muted);border:2px solid var(--line2);border-radius:6px;padding:0 5px;background:#fff}
 .tool.on kbd{color:var(--ink);border-color:var(--ink)}
 .field{display:grid;grid-template-columns:82px 1fr;gap:6px 8px;align-items:center;margin:8px 0}
-.field>label{color:var(--muted);font-weight:600}
+.field>label,.field>span{color:var(--muted);font-weight:600}
+.row .field{display:grid;grid-template-columns:44px 1fr;margin:0}
 .seg{display:flex;border:2px solid var(--ink);border-radius:10px;overflow:hidden;background:#fff}
 .seg button{flex:1;height:30px;border:0;background:#fff;border-right:2px solid var(--ink);font-weight:700}
 .seg button:last-child{border-right:0}
@@ -94,6 +95,9 @@ input[type=range]{width:100%;accent-color:var(--coral);margin:0}
 #hud{position:absolute;left:12px;top:12px;max-width:min(540px,70%);padding:8px 12px;border-radius:12px;background:#fffdf6ee;border:2px solid var(--ink);box-shadow:var(--pop);color:var(--muted);font-size:12px;pointer-events:none}
 #hud b{color:var(--ink)}
 #cv{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:default}
+#attrib{position:absolute;left:10px;bottom:8px;font-size:11px;background:#fffdf6cc;border:1px solid var(--line2);border-radius:6px;padding:1px 6px;display:none}
+#attrib a{color:var(--muted);text-decoration:none}
+#attrib a:hover{text-decoration:underline}
 #zoom{position:absolute;right:12px;bottom:12px;display:flex;flex-direction:column;gap:8px}
 #finish{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);display:none}
 #toast{position:absolute;left:50%;top:14px;transform:translate(-50%,-8px);padding:8px 16px;border-radius:99px;background:var(--ink);color:#fff;font-weight:600;opacity:0;transition:.2s;pointer-events:none;z-index:4;white-space:nowrap}
@@ -182,6 +186,7 @@ tbody tr.sel{background:#e9e2ff}
       <option value="crossL">十字路口（左轉專用相位）</option>
       <option value="t">T 字路口（無號誌）</option>
       <option value="bottle">瓶頸（3 車道 → 1 車道）</option>
+      <option value="round">圓環（四岔）</option>
       <option value="grid">2×2 路網（含號誌）</option>
       <option value="blank">空白畫布</option>
     </select>
@@ -207,7 +212,7 @@ tbody tr.sel{background:#e9e2ff}
       <h3>工具</h3>
       <button class="tool on" data-tool="select"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3l14 8-6 2-2 6z"/></svg>選取／移動<kbd>V</kbd></button>
       <button class="tool" data-tool="draw"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20L20 4M4 20l-1 1M16 4h4v4"/></svg>畫路<kbd>R</kbd></button>
-      <button class="tool" data-tool="signal"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="2" width="8" height="20" rx="3"/><circle cx="12" cy="7" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="17" r="1.4"/></svg>號誌<kbd>S</kbd></button>
+      <button class="tool" data-tool="signal"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="2" width="8" height="20" rx="3"/><circle cx="12" cy="7" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="17" r="1.4"/></svg>號誌／圓環<kbd>S</kbd></button>
       <button class="tool" data-tool="delete"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>刪除<kbd>X</kbd></button>
     </div>
     <div class="group" id="roadOpts">
@@ -215,6 +220,15 @@ tbody tr.sel{background:#e9e2ff}
       <div class="field"><label>每向車道</label><div class="seg" id="newLanes"><button data-v="1" class="on">1</button><button data-v="2">2</button><button data-v="3">3</button></div></div>
       <div class="field"><label>速限</label><select id="newLimit"><option>30</option><option>40</option><option selected>50</option><option>60</option><option>70</option><option>80</option><option>100</option></select></div>
       <label class="chk"><input type="checkbox" id="newOneway">單向道路</label>
+    </div>
+    <div class="group" id="mapOpts">
+      <h3>底圖</h3>
+      <div class="field"><label>來源</label><select id="baseSel"><option value="none">無</option><option value="osm">OpenStreetMap</option><option value="img">自訂圖片</option></select></div>
+      <div class="rng"><label>底圖濃度</label><input type="range" id="rOpa" min="10" max="100" step="5" value="70"><output id="oOpa">70%</output></div>
+      <div class="field" id="geoRow"><label>位置</label><button class="btn" id="geoBtn" style="width:100%">設定座標…</button></div>
+      <div class="field" id="imgRow" style="display:none"><label>圖片</label><label class="btn" style="width:100%;justify-content:center;cursor:pointer">選擇圖片…<input type="file" id="imgFile" accept="image/*" hidden></label></div>
+      <div class="rng" id="imgW" style="display:none"><label>圖寬(公尺)</label><input type="range" id="rImgW" min="50" max="2000" step="10" value="600"><output id="oImgW">600</output></div>
+      <div class="hint" id="mapNote" style="display:none"></div>
     </div>
     <div class="group" id="viewOpts">
       <h3>顯示</h3>
@@ -231,6 +245,7 @@ tbody tr.sel{background:#e9e2ff}
     <div id="hud"></div>
     <div id="empty"><div>目前沒有道路<br>選左側「畫路」開始畫，或從上方載入「範例路網」</div></div>
     <button class="btn primary" id="finish">完成這條路 (Enter)</button>
+    <div id="attrib"><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap 貢獻者</a></div>
     <div id="zoom">
       <button class="btn icon" id="zIn" aria-label="放大">＋</button>
       <button class="btn icon" id="zOut" aria-label="縮小">－</button>
@@ -245,7 +260,9 @@ tbody tr.sel{background:#e9e2ff}
       <h3>交通需求（全域）</h3>
       <div class="rng"><label>入口流量</label><input type="range" id="rFlow" min="0" max="1500" step="25"><output id="oFlow"></output></div>
       <div class="hint" style="margin:-4px 0 6px">每個入口每小時產生的車輛數，單位 veh/h；可在選取入口時單獨覆寫。</div>
+      <div class="rng"><label>機車比例</label><input type="range" id="rMoto" min="0" max="80" step="1"><output id="oMoto"></output></div>
       <div class="rng"><label>貨車比例</label><input type="range" id="rTruck" min="0" max="40" step="1"><output id="oTruck"></output></div>
+      <label class="chk"><input type="checkbox" id="hookChk" checked>機車兩段式左轉（待轉區）</label>
       <div class="rng"><label>左轉權重</label><input type="range" id="rL" min="0" max="100" step="5"><output id="oL"></output></div>
       <div class="rng"><label>直行權重</label><input type="range" id="rS" min="0" max="100" step="5"><output id="oS"></output></div>
       <div class="rng"><label>右轉權重</label><input type="range" id="rR" min="0" max="100" step="5"><output id="oR"></output></div>
@@ -304,6 +321,26 @@ tbody tr.sel{background:#e9e2ff}
   </div>
 </div>
 
+<div class="modal" id="geoModal">
+  <div class="sheet" style="max-width:560px">
+    <h2>底圖座標</h2>
+    <div class="hint">設定畫面原點（0, 0）對應的真實位置，底圖就會對齊你畫的道路。可直接貼 Google 地圖或 OpenStreetMap 的網址。</div>
+    <div class="row">
+      <select id="geoPreset" style="flex:1 1 180px"><option value="">常用地點…</option>
+        <option value="25.0478,121.5170">台北車站</option><option value="25.0330,121.5654">台北 101</option>
+        <option value="24.1477,120.6736">台中火車站</option><option value="22.9971,120.2129">台南火車站</option>
+        <option value="22.6393,120.3021">高雄車站</option><option value="24.8015,120.9715">新竹火車站</option></select>
+    </div>
+    <div class="row">
+      <label class="field" style="flex:1 1 150px"><span>緯度</span><input type="text" id="geoLat" inputmode="decimal"></label>
+      <label class="field" style="flex:1 1 150px"><span>經度</span><input type="text" id="geoLon" inputmode="decimal"></label>
+    </div>
+    <div class="row"><input type="text" id="geoUrl" placeholder="貼上 Google 地圖／OSM 網址" style="flex:1"><button class="btn" id="geoParse">讀取</button></div>
+    <div class="hint" id="geoMsg"></div>
+    <div class="row" style="justify-content:flex-end"><button class="btn" data-close>取消</button><button class="btn primary" id="geoOk">套用</button></div>
+  </div>
+</div>
+
 <div class="modal" id="helpModal">
   <div class="sheet">
     <h2>操作說明</h2>
@@ -313,6 +350,9 @@ tbody tr.sel{background:#e9e2ff}
       <kbd>Shift</kbd><span>畫路時按住，角度吸附 15°</span>
       <kbd>滾輪／雙指</kbd><span>縮放；拖曳空白處（或中鍵／右鍵拖曳）平移</span>
       <kbd>選取</kbd><span>點道路或節點看屬性；拖曳節點可移動；入口可單獨設定流量；路口可開關號誌並調整時制</span>
+      <kbd>圓環</kbd><span>選取路口後可改成圓環並調整半徑；車輛逆時針繞行、進環讓行環內車。</span>
+      <kbd>機車</kbd><span>機車靠車道右側行駛、會鑽過停等的小客車，並在有號誌路口做兩段式左轉（可關閉）。</span>
+      <kbd>底圖</kbd><span>左側可開 OpenStreetMap 底圖並設定座標，直接照著實際路網描；也可改用自己的圖片當底圖。</span>
       <kbd>號誌</kbd><span>選取路口後可設定 A／B 兩個方向軸的直行綠燈、左轉專用、右轉專用相位與黃燈／全紅；紅燈（含右轉）車輛一律停等，不會闖紅燈。畫面放大後會在車道上顯示白色方向箭頭。</span>
       <kbd>空白鍵</kbd><span>播放／暫停</span>
       <kbd>.</kbd><span>前進 1 秒</span>
@@ -334,6 +374,7 @@ const W = 3.5;            // lane width (m)
 const DT = 0.1;           // fixed time step (s)
 const TYPES = {
   car:   { key: 'car',   name: '小客車', len: 4.5, wid: 1.9, a: 2.0, b: 2.5, T: 1.2, s0: 2.0, vmax: 36 },
+  moto:  { key: 'moto',  name: '機車',   len: 1.9, wid: 0.72, a: 2.8, b: 3.2, T: 0.8, s0: 1.0, vmax: 17 },
   truck: { key: 'truck', name: '貨車',   len: 12,  wid: 2.5, a: 1.2, b: 2.2, T: 1.5, s0: 3.0, vmax: 22.2 }
 };
 
@@ -348,6 +389,10 @@ function mulberry32(seed) {
   };
 }
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const MOTO_LAT = W * 0.5 - 0.45;        // motorcycles ride near the kerb side of their lane
+function latOf(x, lane) { return ((lane == null ? x.lane : lane) + 0.5) * W + (x.moto ? MOTO_LAT : 0); }
+/* a car ignores a motorcycle squeezing past at the edge of its lane */
+function passable(x, o) { return o.moto && x.type === 'car' && Math.abs(o.lat - x.lat) > 1.05; }
 
 /* ------------------------------------------------------------------ */
 /* Editable network model                                              */
@@ -437,6 +482,7 @@ function defaultSig() { return { g0: 30, g1: 30, lA: 0, lB: 0, rA: 0, rB: 0, y: 
 /* ------------------------------------------------------------------ */
 function laneMovesOf(e, gn) {
   const n = e.lanes, out = [];
+  if (gn.ring) { for (let li = 0; li < n; li++) out.push(e.av); return out; }
   let dedL = false, dedR = false;
   if (gn.sig && gn.deg >= 3) {
     const c = compileSig(gn.sig);
@@ -461,6 +507,7 @@ function buildGraph(net) {
   const g = { nodes: new Map(), edges: [], conns: new Map(), connSeq: 0, sources: [] };
   for (const n of net.nodes) {
     g.nodes.set(n.id, { id: n.id, x: n.x, y: n.y, sig: n.sig ? Object.assign({}, n.sig) : null, flow: n.flow,
+      ring: n.ring > 0 ? clamp(+n.ring, 6, 60) : 0,
       deg: 0, maxLanes: 1, R: 0, in: [], out: [], occ: [], queue: 0,
       stat: { sum: 0, n: 0, flow: 0, maxQ: 0, sumQ: 0, nQ: 0 } });
   }
@@ -470,7 +517,9 @@ function buildGraph(net) {
   }
   for (const gn of g.nodes.values()) {
     gn.R = gn.deg >= 3 ? 6 + W * gn.maxLanes + (gn.deg >= 4 ? 2 : 0) : (gn.deg === 2 ? 3 : 0);
-    if (gn.deg < 3) gn.sig = null;
+    if (gn.deg < 3) { gn.sig = null; gn.ring = 0; }
+    if (gn.ring) { gn.sig = null; gn.R = gn.ring + W * 0.5 + 2.5; }
+    gn.box = {};
   }
   let eid = 0;
   for (const r of net.roads) {
@@ -504,7 +553,7 @@ function buildGraph(net) {
     }
     if (gn.sig && gn.in.length) {
       const ref = gn.in[0].ang;
-      for (const e of gn.in) {
+      for (const e of gn.in.concat(gn.out)) {
         let d = Math.abs(((e.ang - ref) % Math.PI + Math.PI) % Math.PI);
         d = Math.min(d, Math.PI - d);
         e.group = d < Math.PI / 4 ? 0 : 1;
@@ -520,39 +569,90 @@ function mapLane(i, inN, outN, turn) {
   if (turn === 'R') return clamp(outN - 1 - (inN - 1 - i), 0, outN - 1);   // lane 0 = next to centre line, last lane = kerb
   return Math.min(i, outN - 1);
 }
+const TAU = Math.PI * 2;
 
-function getConn(g, e, i, oe, j) {
-  const key = e.id + '.' + i + '>' + oe.id + '.' + j;
-  let c = g.conns.get(key); if (c) return c;
-  const o0 = (i + 0.5) * W, o1 = (j + 0.5) * W;
-  const p0x = e.ex + e.nx * o0, p0y = e.ey + e.ny * o0;
-  const p1x = oe.sx + oe.nx * o1, p1y = oe.sy + oe.ny * o1;
-  const cr = e.dx * oe.dy - e.dy * oe.dx;
-  let cx = (p0x + p1x) / 2, cy = (p0y + p1y) / 2;
-  if (Math.abs(cr) > 1e-3) {
-    const s = ((p1x - p0x) * oe.dy - (p1y - p0y) * oe.dx) / cr;
-    if (s > 0 && s < 80) { cx = p0x + e.dx * s; cy = p0y + e.dy * s; }
+/* ---- path helpers: every connector is a densely sampled polyline with a
+   continuous (unwrapped) heading per sample, so headings interpolate smoothly ---- */
+function bezPts(out, p0, c1, c2, p3, n, skipFirst) {
+  for (let k = skipFirst ? 1 : 0; k <= n; k++) {
+    const t = k / n, u = 1 - t, a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, d = t * t * t;
+    out.push(a * p0[0] + b * c1[0] + c * c2[0] + d * p3[0], a * p0[1] + b * c1[1] + c * c2[1] + d * p3[1]);
   }
-  const n = 12, pts = new Float64Array((n + 1) * 2), cum = new Float64Array(n + 1);
+}
+function mkPath(a) {
+  const n = a.length / 2 - 1, pts = Float64Array.from(a), cum = new Float64Array(n + 1), ang = new Float64Array(n + 1);
+  for (let k = 1; k <= n; k++) cum[k] = cum[k - 1] + Math.hypot(pts[2 * k] - pts[2 * k - 2], pts[2 * k + 1] - pts[2 * k - 1]);
   for (let k = 0; k <= n; k++) {
-    const t = k / n, u = 1 - t;
-    pts[2 * k] = u * u * p0x + 2 * u * t * cx + t * t * p1x;
-    pts[2 * k + 1] = u * u * p0y + 2 * u * t * cy + t * t * p1y;
-    if (k) cum[k] = cum[k - 1] + Math.hypot(pts[2 * k] - pts[2 * k - 2], pts[2 * k + 1] - pts[2 * k - 1]);
+    const p = Math.max(0, k - 1), q = Math.min(n, k + 1);
+    let t = Math.atan2(pts[2 * q + 1] - pts[2 * p + 1], pts[2 * q] - pts[2 * p]);
+    if (k) { const pr = ang[k - 1]; t = pr + Math.atan2(Math.sin(t - pr), Math.cos(t - pr)); }   // unwrap
+    ang[k] = t;
   }
-  const t = e.turns.get(oe.id);
-  const turn = t ? t.type : 'S';
-  c = { id: g.connSeq++, key, e, i, oe, j, pts, cum, n, len: Math.max(0.5, cum[n]), turn, vmax: turn === 'S' ? 99 : (turn === 'R' ? 6.5 : 5.5), conf: new Map() };
+  let kap = 0;
+  for (let k = 1; k < n; k++) { const ds = cum[k + 1] - cum[k - 1]; if (ds > 0.3) kap = Math.max(kap, Math.abs(ang[k + 1] - ang[k - 1]) / ds); }
+  return { pts, cum, ang, n, len: Math.max(0.5, cum[n]), vmax: kap > 1e-4 ? clamp(Math.sqrt(3.4 / kap), 4.2, 99) : 99 };
+}
+
+/* connector key kinds: '' normal, 'h' motorcycle two-stage-left waiting box */
+function getConn(g, e, i, oe, j, hook, slot) {
+  slot = hook ? (slot | 0) : 0;
+  const key = (hook ? 'h' : '') + e.id + '.' + i + '>' + oe.id + '.' + j + (hook ? '#' + slot : '');
+  let c = g.conns.get(key); if (c) return c;
+  const gn = e.b, o0 = (i + 0.5) * W, o1 = (j + 0.5) * W;
+  const p0 = [e.ex + e.nx * o0, e.ey + e.ny * o0];
+  const din = [e.dx, e.dy], dout = [oe.dx, oe.dy];
+  const tt = e.turns.get(oe.id), turn = hook ? 'L' : (tt ? tt.type : 'S');
+  let path, ring = null, box = null;
+  if (hook) {
+    // cross straight through on your own green, then pull into the waiting box at the far right corner
+    const col = slot % 3, row = Math.floor(slot / 3);
+    const lat = oe.lanes * W - 0.6 - col * 0.9, fwd = 1.0 - row * 2.0;
+    const p3 = [oe.sx + oe.nx * lat + oe.dx * fwd, oe.sy + oe.ny * lat + oe.dy * fwd];
+    const k = clamp(Math.hypot(p3[0] - p0[0], p3[1] - p0[1]) * 0.5, 2, 26), a = [], d2 = [din[0], din[1]];
+    bezPts(a, p0, [p0[0] + d2[0] * k, p0[1] + d2[1] * k], [p3[0] - d2[0] * k, p3[1] - d2[1] * k], p3, 14, false);
+    path = mkPath(a); path.vmax = Math.min(path.vmax, 7);
+    box = { x: p3[0], y: p3[1], ang: Math.atan2(dout[1], dout[0]) };
+  } else if (gn.ring) {
+    // roundabout: short entry spline, counter-clockwise ring arc, short exit spline
+    const R = gn.ring, cx = gn.x, cy = gn.y;
+    const p3 = [oe.sx + oe.nx * o1, oe.sy + oe.ny * o1];
+    const rawA = Math.atan2(p0[1] - cy, p0[0] - cx), rawB = Math.atan2(p3[1] - cy, p3[0] - cx);
+    let arc = (rawA - rawB) % TAU; if (arc < 0) arc += TAU; if (arc < 0.25) arc += TAU;   // travel = decreasing angle
+    const DEF = Math.min(0.6, arc * 0.3);              // join and leave the ring tangentially
+    const thA = rawA - DEF, thB = rawB + DEF; arc -= 2 * DEF;
+    const A = [cx + R * Math.cos(thA), cy + R * Math.sin(thA)], B = [cx + R * Math.cos(thB), cy + R * Math.sin(thB)];
+    const tA = [Math.sin(thA), -Math.cos(thA)], tB = [Math.sin(thB), -Math.cos(thB)];
+    const k1 = clamp(Math.hypot(A[0] - p0[0], A[1] - p0[1]) * 0.55, 0.8, 14);
+    const k2 = clamp(Math.hypot(p3[0] - B[0], p3[1] - B[1]) * 0.55, 0.8, 14);
+    const a = [];
+    bezPts(a, p0, [p0[0] + din[0] * k1, p0[1] + din[1] * k1], [A[0] - tA[0] * k1, A[1] - tA[1] * k1], A, 5, false);
+    const m = Math.max(4, Math.round(arc / 0.2));
+    for (let q = 1; q <= m; q++) { const th = thA - arc * q / m; a.push(cx + R * Math.cos(th), cy + R * Math.sin(th)); }
+    bezPts(a, B, [B[0] + tB[0] * k2, B[1] + tB[1] * k2], [p3[0] - dout[0] * k2, p3[1] - dout[1] * k2], p3, 5, true);
+    path = mkPath(a);
+    ring = { R, thA, thB, arc, sA: path.cum[5], sB: path.cum[5 + m] };
+    path.vmax = clamp(Math.sqrt(3.4 * R), 5.5, 12);
+  } else {
+    const p3 = [oe.sx + oe.nx * o1, oe.sy + oe.ny * o1];
+    const k = clamp(Math.hypot(p3[0] - p0[0], p3[1] - p0[1]) * 0.45, 1.5, 40), a = [];
+    bezPts(a, p0, [p0[0] + din[0] * k, p0[1] + din[1] * k], [p3[0] - dout[0] * k, p3[1] - dout[1] * k], p3, 16, false);
+    path = mkPath(a);
+  }
+  c = Object.assign(path, { id: g.connSeq++, key, e, i, oe, j, turn, hook: !!hook, slot, ring, box, conf: new Map() });
   g.conns.set(key, c);
   return c;
 }
+function ringTheta(c, cs) { return c.ring.thA - (cs - c.ring.sA) / c.ring.R; }
+function fwdAng(a, b) { let d = (a - b) % TAU; if (d < 0) d += TAU; return d; }   // angular distance travelled from b to a
+
 function conflictPairs(a, b) {
   let r = a.conf.get(b.id); if (r) return r;
   const out = [];
   const merge = a.oe === b.oe && a.j === b.j;
-  for (let k = 0; k <= a.n; k++) {
-    for (let m = 0; m <= b.n; m++) {
-      if (merge && k >= a.n - 3 && m >= b.n - 3) continue;   // plain merge: handled by car-following
+  const ka = Math.max(1, Math.round(a.n / 16)), kb = Math.max(1, Math.round(b.n / 16));
+  for (let k = 0; k <= a.n; k += ka) {
+    for (let m = 0; m <= b.n; m += kb) {
+      if (merge && a.len - a.cum[k] < 7 && b.len - b.cum[m] < 7) continue;   // plain merge: handled by car-following
       if (Math.hypot(a.pts[2 * k] - b.pts[2 * m], a.pts[2 * k + 1] - b.pts[2 * m + 1]) < 2.6) out.push(k, m);
     }
   }
@@ -563,10 +663,11 @@ function conflictPairs(a, b) {
 function connConflict(a, b) { return a !== b && conflictPairs(a, b).length > 0; }
 function connPose(c, s) {
   s = clamp(s, 0, c.len);
-  let k = 1; while (k < c.n && c.cum[k] < s) k++;
-  const s0 = c.cum[k - 1], s1 = c.cum[k], f = s1 > s0 ? (s - s0) / (s1 - s0) : 0;
-  const x0 = c.pts[2 * k - 2], y0 = c.pts[2 * k - 1], x1 = c.pts[2 * k], y1 = c.pts[2 * k + 1];
-  return { x: x0 + (x1 - x0) * f, y: y0 + (y1 - y0) * f, ang: Math.atan2(y1 - y0, x1 - x0) };
+  const cum = c.cum; let lo = 0, hi = c.n - 1;
+  while (lo < hi) { const m = (lo + hi + 1) >> 1; if (cum[m] <= s) lo = m; else hi = m - 1; }
+  const s0 = cum[lo], s1 = cum[lo + 1], f = s1 > s0 ? (s - s0) / (s1 - s0) : 0;
+  const x0 = c.pts[2 * lo], y0 = c.pts[2 * lo + 1];
+  return { x: x0 + (c.pts[2 * lo + 2] - x0) * f, y: y0 + (c.pts[2 * lo + 3] - y0) * f, ang: c.ang[lo] + (c.ang[lo + 1] - c.ang[lo]) * f };
 }
 
 /* Signal programme: per axis (group 0 = A, 1 = B) an optional left-only phase, the through phase,
@@ -620,7 +721,7 @@ function losOf(delay, signalized) {
 /* ------------------------------------------------------------------ */
 class Sim {
   constructor(net, opt) {
-    this.opt = Object.assign({ flow: 300, truck: 8, wL: 20, wS: 60, wR: 20, seed: 1 }, opt || {});
+    this.opt = Object.assign({ flow: 300, truck: 8, moto: 25, hook: true, wL: 20, wS: 60, wR: 20, seed: 1 }, opt || {});
     this.reset(net);
   }
   reset(net) {
@@ -637,10 +738,18 @@ class Sim {
   gauss() { const u = Math.max(1e-9, this.rng()), v = this.rng(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
 
   makeVeh(type, e, lane, s, v) {
-    const P = TYPES[type];
-    return { id: this.nextId++, type, p: P, len: P.len, wid: P.wid, f: clamp(1 + 0.1 * this.gauss(), 0.8, 1.25),
-      v, a: 0, aReal: 0, vd: 0, e, lane, s, lat: (lane + 0.5) * W, conn: null, cs: 0, next: null, turn: 'S',
+    const P = TYPES[type], moto = type === 'moto';
+    return { id: this.nextId++, type, p: P, len: P.len, wid: P.wid, moto, f: clamp(1 + 0.1 * this.gauss(), 0.8, 1.25),
+      v, a: 0, aReal: 0, vd: 0, e, lane, s, lat: (lane + 0.5) * W + (moto ? MOTO_LAT : 0), conn: null, cs: 0, next: null, turn: 'S',
+      hook: false, slot: 0, hookWait: false, hookT: 0, filt: false,
       t0: this.t, ff: 0, stops: 0, moving: true, waitT: 0, lcT: 0, zoneE: null, zoneT: 0, zoneS: 0, zoneV: 10, permit: true, dead: false };
+  }
+  /* the connector this vehicle would use next */
+  connOf(x) {
+    const e = x.e, oe = x.next; if (!oe) return null;
+    const gn = e.b;
+    const j = gn.ring ? oe.lanes - 1 : mapLane(x.lane, e.lanes, oe.lanes, x.turn);
+    return getConn(this.g, e, x.lane, oe, j, x.hook, x.hook ? (gn.box[oe.id] || 0) : 0);
   }
   chooseNext(x, free) {
     const e = x.e, gn = e.b;
@@ -649,7 +758,9 @@ class Sim {
     const cands = gn.out.filter(oe => oe.id !== e.rev);
     if (!cands.length) return;
     const w = { L: this.opt.wL, S: this.opt.wS, R: this.opt.wR };
-    const lm = e.lm ? e.lm[x.lane] : 'LSR'; const allowed = k => free || lm.includes(k);
+    const hookOK = !!(x.moto && this.opt.hook && gn.sig && !gn.ring);
+    const lm = e.lm ? e.lm[x.lane] : 'LSR';
+    const allowed = k => free || lm.includes(k) || (k === 'L' && hookOK && x.lane === e.lanes - 1);
     const by = { L: [], S: [], R: [] };
     for (const oe of cands) { const k = e.turns.get(oe.id).type; if (allowed(k)) by[k].push(oe); }
     if (!by.L.length && !by.S.length && !by.R.length) for (const oe of cands) by[e.turns.get(oe.id).type].push(oe);
@@ -667,6 +778,8 @@ class Sim {
       if (!pick) pick = by.L.concat(by.S, by.R)[0];
     }
     x.next = pick; x.turn = e.turns.get(pick.id).type;
+    x.hook = hookOK && x.turn === 'L';
+    const c = this.connOf(x); x.cvm = c ? c.vmax : 99;
   }
 
   /* may front vehicle x of its lane pass the stop line now? */
@@ -688,11 +801,24 @@ class Sim {
       }
     }
     x.sigRed = stRed;
-    const j = mapLane(x.lane, e.lanes, oe.lanes, x.turn);
-    const c = getConn(g, e, x.lane, oe, j);
-    // exit space
-    const ol = oe.lanesArr[j];
-    if (ol.length) { const o = ol[0]; if (o.s - o.len < 0.5 && !(forced)) { x.why = 'exit'; return false; } }
+    if (x.hook && (gn.box[oe.id] || 0) >= 9) { if (x.waitT < 25) { x.why = 'boxfull'; return false; } x.hook = false; }
+    const c = this.connOf(x), j = c.j;
+    // exit space (a two-stage left ends in the waiting box, not on the far edge)
+    if (!c.hook) {
+      const ol = oe.lanesArr[j];
+      if (ol.length) { const o = ol[0]; if (o.s - o.len < 0.5 && !(forced)) { x.why = 'exit'; return false; } }
+    }
+    if (gn.ring) {
+      const R = gn.ring, thA = c.ring.thA;
+      const crit = (x.moto ? 2.2 : (x.type === 'truck' ? 3.8 : 3.0)) * (forced ? 0.5 : 1);
+      for (const o of gn.occ) {
+        if (!o.conn.ring) continue;
+        const th = ringTheta(o.conn, o.cs), behind = fwdAng(th, thA);
+        if (R * (TAU - behind) < x.len + 2.4) { x.why = 'ringbusy'; return false; }          // sitting just past the entry
+        if (behind < Math.PI * 1.1 && R * behind / Math.max(o.v, 2.2) < crit) { x.why = 'ringyield'; return false; }
+      }
+      return true;
+    }
     // vehicles in the node
     if (!forced) {
       for (const o of gn.occ) {
@@ -715,7 +841,7 @@ class Sim {
           const L2 = E2.lanesArr[li]; if (!L2.length) continue;
           const y = L2[L2.length - 1];
           const d2 = E2.len - y.s; if (d2 > 60 || !y.next) continue;
-          const c2 = getConn(g, E2, y.lane, y.next, mapLane(y.lane, E2.lanes, y.next.lanes, y.turn));
+          const c2 = this.connOf(y); if (!c2) continue;
           if (!connConflict(c, c2)) continue;
           const tY = d2 / Math.max(y.v, 3);
           if (gn.sig) {
@@ -743,21 +869,24 @@ class Sim {
   }
   tryInsert(gn) {
     const e = gn.out[0];
-    const type = this.rng() * 100 < this.opt.truck ? 'truck' : 'car';
-    const x = this.makeVeh(type, e, 0, type === 'truck' ? 12 : 4.5, 0);
+    const r0 = this.rng() * 100, mo = this.opt.moto || 0;
+    const type = r0 < mo ? 'moto' : (r0 < mo + this.opt.truck ? 'truck' : 'car');
+    const x = this.makeVeh(type, e, 0, 0, 0);
     this.chooseNext(x, true);
     const v0 = Math.min(e.limit * x.f, x.p.vmax);
     const okL = [], rest = [];
     for (let li = 0; li < e.lanes; li++) ((e.lm && e.lm[li].includes(x.turn)) || !e.lm ? okL : rest).push(li);
-    const start = Math.floor(this.rng() * okL.length);
-    const order = okL.slice(start).concat(okL.slice(0, start), rest);
+    let order;
+    if (x.moto) order = okL.slice().reverse().concat(rest.slice().reverse());   // motorcycles keep to the kerb
+    else { const start = Math.floor(this.rng() * Math.max(1, okL.length)); order = okL.slice(start).concat(okL.slice(0, start), rest); }
     for (let q = 0; q < order.length; q++) {
       const li = order[q], L = e.lanesArr[li], o = L.length ? L[0] : null;
       let vInit = v0 * 0.85, gap = Infinity;
       if (o) { gap = o.s - o.len - x.len; vInit = Math.min(vInit, o.v + 3); }
       if (gap >= vInit * 1.1 + 3) {
-        x.lane = li; x.lat = (li + 0.5) * W; x.s = x.len; x.v = vInit;
+        x.lane = li; x.lat = latOf(x, li); x.s = x.len; x.v = vInit;
         if (!(e.lm && e.lm[li].includes(x.turn))) this.chooseNext(x);
+        else { const c0 = this.connOf(x); x.cvm = c0 ? c0.vmax : 99; }
         L.unshift(x); this.vehicles.push(x); this.tot.spawned++;
         return true;
       }
@@ -780,27 +909,46 @@ class Sim {
           const x = L[k], dist = e.len - x.s;
           let v0 = Math.min(e.limit * x.f, x.p.vmax);
           if (gn.deg >= 3 && x.zoneE !== e && dist <= 60) { x.zoneE = e; x.zoneT = t; x.zoneS = x.s; x.zoneV = v0; }
-          if (x.next && x.turn !== 'S') { const vt = x.turn === 'R' ? 6.5 : 5.5; v0 = Math.min(v0, Math.sqrt(vt * vt + 5 * Math.max(0, dist))); }
+          if (x.next && x.cvm < 50) { const vt = x.cvm; v0 = Math.min(v0, Math.sqrt(vt * vt + 5 * Math.max(0, dist))); }
+          let kk = k + 1;
+          while (kk < L.length) {                       // filter past stopped cars (motorcycles) / past a filtering bike (cars)
+            const o = L[kk];
+            if (passable(x, o) || (x.moto && o.type === 'car' && o.v < 2.5 && x.v < 8)) kk++; else break;
+          }
+          x.filt = kk > k + 1 && !passable(x, L[k + 1]);
+          if (x.filt) v0 = Math.min(v0, 6);
           x.vd = v0;
           let gap = Infinity, vl = 0, gapR = Infinity, vlR = 0;
-          if (k + 1 < L.length) { const o = L[k + 1]; gap = o.s - o.len - x.s; vl = o.v; gapR = gap; vlR = vl; }
+          if (kk < L.length) { const o = L[kk]; gap = o.s - o.len - x.s; vl = o.v; gapR = gap; vlR = vl; }
           else if (x.next) {
             const ok = this.mayEnter(x); x.permit = ok;
             if (!ok) { const gg = dist + 1.5; if (gg < gap) { gap = gg; vl = 0; } }
             else {
-              const oe = x.next, j = mapLane(x.lane, e.lanes, oe.lanes, x.turn), c = getConn(g, e, x.lane, oe, j);
+              const c = this.connOf(x), oe = c.oe, j = c.j;
               for (const o of gn.occ) {
+                if (o.hookWait) continue;
                 if (o.conn.e === e && o.conn.i === x.lane) { const gg = dist + o.cs - o.len; if (gg < gap) { gap = gg; vl = o.v; } }
+              }
+              if (gn.ring) {
+                const R = gn.ring, thA = c.ring.thA;
+                for (const o of gn.occ) {
+                  if (!o.conn.ring || o.conn.e === e) continue;
+                  const gg = dist + R * fwdAng(thA, ringTheta(o.conn, o.cs)) - o.len;
+                  if (gg < gap) { gap = gg; vl = o.v; }
+                }
               }
               const myEnd = dist + c.len;
               for (const o of gn.occ) {
+                if (o.hookWait || o.conn.hook) continue;
                 if (o.conn.oe === oe && o.conn.j === j && !(o.conn.e === e && o.conn.i === x.lane)) {
                   const doEnd = o.conn.len - o.cs;
                   if (doEnd < myEnd) { const gg = myEnd - doEnd - o.len; if (gg < gap) { gap = gg; vl = o.v; } }
                 }
               }
-              const ol = oe.lanesArr[j];
-              if (ol.length) { const o = ol[0], gg = dist + c.len + o.s - o.len; if (gg < gap) { gap = gg; vl = o.v; } }
+              if (!c.hook) {
+                const ol = oe.lanesArr[j];
+                if (ol.length) { const o = ol[0], gg = dist + c.len + o.s - o.len; if (gg < gap) { gap = gg; vl = o.v; } }
+              }
             }
             if (x.v < 0.3 && dist < 8 && !x.sigRed) x.waitT += DT; else if (!(x.v < 0.3)) x.waitT = 0;
           }
@@ -812,20 +960,33 @@ class Sim {
     for (const gn of g.nodes.values()) {
       for (const x of gn.occ) {
         const c = x.conn;
+        if (x.hookWait) { x.a = x.aReal = 0; x.v = 0; x.vd = 0; continue; }
         const v0 = Math.min(c.oe.limit * x.f, x.p.vmax, c.vmax);
         let gap = Infinity, vl = 0;
-        for (const o of gn.occ) {
-          if (o !== x && o.conn === c && o.cs > x.cs) { const gg = o.cs - o.len - x.cs; if (gg < gap) { gap = gg; vl = o.v; } }
-        }
         const dxEnd = c.len - x.cs;
-        for (const o of gn.occ) {
-          if (o.conn !== c && o.conn.oe === c.oe && o.conn.j === c.j) {
-            const doEnd = o.conn.len - o.cs;
-            if (doEnd < dxEnd) { const gg = dxEnd - doEnd - o.len; if (gg < gap) { gap = gg; vl = o.v; } }
+        if (gn.ring) {                                   // one circulating lane: follow by ring angle
+          const th = ringTheta(c, x.cs), R = gn.ring;
+          for (const o of gn.occ) {
+            if (o === x || !o.conn.ring) continue;
+            const gg = R * fwdAng(th, ringTheta(o.conn, o.cs)) - o.len;
+            if (gg < gap) { gap = gg; vl = o.v; }
+          }
+        } else {
+          for (const o of gn.occ) {
+            if (o !== x && o.conn === c && o.cs > x.cs) { const gg = o.cs - o.len - x.cs; if (gg < gap) { gap = gg; vl = o.v; } }
+          }
+          for (const o of gn.occ) {
+            if (o.hookWait || o.conn.hook || o.conn === c) continue;
+            if (o.conn.oe === c.oe && o.conn.j === c.j) {
+              const doEnd = o.conn.len - o.cs;
+              if (doEnd < dxEnd) { const gg = dxEnd - doEnd - o.len; if (gg < gap) { gap = gg; vl = o.v; } }
+            }
           }
         }
-        const ol = c.oe.lanesArr[c.j];
-        if (ol.length) { const o = ol[0], gg = dxEnd + o.s - o.len; if (gg < gap) { gap = gg; vl = o.v; } }
+        if (!c.hook) {
+          const ol = c.oe.lanesArr[c.j];
+          if (ol.length) { const o = ol[0], gg = dxEnd + o.s - o.len; if (gg < gap) { gap = gg; vl = o.v; } }
+        }
         x.vd = v0;
         x.a = x.aReal = idmAcc(x.p, x.v, v0, gap, x.v - vl);
       }
@@ -857,6 +1018,7 @@ class Sim {
             if (tl > maxLane) continue;
             if (x.next && e.lm && !e.lm[tl].includes(x.turn)) continue;
             const T = e.lanesArr[tl], nb = this.neighbors(T, x.s);
+            if (nb.lead && passable(x, nb.lead)) continue;
             const gapL = nb.lead ? nb.lead.s - nb.lead.len - x.s : Infinity;
             const gapF = nb.fol ? x.s - x.len - nb.fol.s : Infinity;
             if (gapL < 2 + 0.3 * Math.max(0, nb.lead ? x.v - nb.lead.v : 0)) continue;
@@ -874,7 +1036,7 @@ class Sim {
               const after = idmAcc(oldFol.p, oldFol.v, oldFol.vd, oldLead ? oldLead.s - oldLead.len - oldFol.s : Infinity, oldLead ? oldFol.v - oldLead.v : 0);
               dF += after - before;
             }
-            let inc = (aNew - x.aReal) + 0.3 * dF + (dir < 0 ? 0.1 : 0);
+            let inc = (aNew - x.aReal) + 0.3 * dF + (dir < 0 ? 0.1 : 0) + (x.moto && dir > 0 ? 0.45 : 0);
             if (li > maxLane) inc += 4;
             if (inc > bestInc) { bestInc = inc; best = tl; }
           }
@@ -899,6 +1061,7 @@ class Sim {
   move() {
     const dt = DT, t = this.t;
     for (const x of this.vehicles) {
+      if (x.hookWait) { x.v = 0; continue; }
       const v0 = x.v; let nv = v0 + x.a * dt, ds;
       if (nv < 0) { nv = 0; ds = x.a < 0 ? v0 * v0 / (2 * -x.a) : 0; } else ds = v0 * dt + 0.5 * x.a * dt * dt;
       x.v = nv;
@@ -908,13 +1071,14 @@ class Sim {
         x.cs += ds;
       } else {
         x.s += ds;
-        x.lat += ((x.lane + 0.5) * W - x.lat) * Math.min(1, dt * 3);
+        x.lat += (latOf(x) - x.lat) * Math.min(1, dt * 3);
       }
     }
     for (const x of this.vehicles) {
       if (x.dead) continue;
       if (x.conn) {
         const c = x.conn;
+        if (c.hook && x.cs >= c.len) { x.cs = c.len; x.v = 0; if (!x.hookWait) { x.hookWait = true; x.hookT = t; } continue; }
         if (x.cs >= c.len) {
           const gn = c.e.b, oe = c.oe, i = gn.occ.indexOf(x); if (i >= 0) gn.occ.splice(i, 1);
           x.conn = null; x.e = oe; x.lane = c.j; x.s = x.cs - c.len; x.lat = (c.j + 0.5) * W;
@@ -928,7 +1092,7 @@ class Sim {
         if (x.s >= e.len) {
           if (!x.next) { this.exitVeh(x); continue; }
           if (!this.mayEnter(x)) { x.s = e.len; x.v = 0; continue; }
-          const gn = e.b, oe = x.next, j = mapLane(x.lane, e.lanes, oe.lanes, x.turn), c = getConn(this.g, e, x.lane, oe, j);
+          const gn = e.b, c = this.connOf(x), oe = c.oe;
           if (gn.deg >= 3 && x.zoneE === e) {
             const free = (e.len - x.zoneS) / Math.max(3, x.zoneV);
             gn.stat.sum += Math.max(0, (t - x.zoneT) - free); gn.stat.n++;
@@ -936,10 +1100,32 @@ class Sim {
           gn.stat.flow++;
           const L = e.lanesArr[x.lane], i = L.indexOf(x); if (i >= 0) L.splice(i, 1);
           x.conn = c; x.cs = x.s - e.len; gn.occ.push(x);
+          if (c.hook) gn.box[oe.id] = (gn.box[oe.id] || 0) + 1;
         }
       }
     }
     if (this.vehicles.some(x => x.dead)) this.vehicles = this.vehicles.filter(x => !x.dead);
+  }
+
+  /* second stage of a motorcycle two-stage left turn */
+  releaseBoxes() {
+    for (const gn of this.g.nodes.values()) {
+      for (let q = gn.occ.length - 1; q >= 0; q--) {
+        const x = gn.occ[q]; if (!x.hookWait) continue;
+        const oe = x.conn.oe;
+        if (gn.sig && sigState(gn.sig, oe.group, 'S', this.t) !== 'G') continue;
+        const li = oe.lanes - 1, L = oe.lanesArr[li];
+        if (L.length && L[0].s - L[0].len < x.len + 2.5) continue;
+        gn.occ.splice(q, 1);
+        gn.box[oe.id] = Math.max(0, (gn.box[oe.id] || 1) - 1);
+        gn.stat.sum += this.t - x.hookT;                 // the wait counts as control delay
+        x.conn = null; x.hookWait = false; x.hook = false; x.e = oe; x.lane = li; x.s = x.len; x.v = 0;
+        x.lat = latOf(x); x.zoneE = null; x.waitT = 0; x.moving = false;
+        let pIdx = L.length; while (pIdx > 0 && L[pIdx - 1].s > x.s) pIdx--;
+        L.splice(pIdx, 0, x);
+        this.chooseNext(x);
+      }
+    }
   }
 
   sampleQueues() {
@@ -973,6 +1159,7 @@ class Sim {
   step() {
     this.t += DT; this.k++;
     this.spawn(DT);
+    this.releaseBoxes();
     this.accel();
     this.lanes();
     this.move();
@@ -989,7 +1176,7 @@ class Sim {
     for (const gn of this.g.nodes.values()) {
       if (gn.deg < 3) continue;
       const s = gn.stat, d = s.n ? s.sum / s.n : 0;
-      out.push({ id: gn.id, signal: !!gn.sig, n: s.n, flow: this.t > 5 ? s.flow / this.t * 3600 : 0, delay: d, los: s.n ? losOf(d, !!gn.sig) : '–', maxQ: s.maxQ, avgQ: s.nQ ? s.sumQ / s.nQ : 0 });
+      out.push({ id: gn.id, signal: !!gn.sig, ring: !!gn.ring, n: s.n, flow: this.t > 5 ? s.flow / this.t * 3600 : 0, delay: d, los: s.n ? losOf(d, !!gn.sig) : '–', maxQ: s.maxQ, avgQ: s.nQ ? s.sumQ / s.nQ : 0 });
     }
     return out;
   }
@@ -1003,7 +1190,7 @@ class Sim {
 }
 
 const api = { W, DT, TYPES, Sim, createNet, addNode, addSegment, deleteRoad, deleteNode, nodeDegree, defaultSig, N,
-  nearNode, projectOnRoad, nodeAtOrSplit, splitRoad, buildGraph, sigState, sigInfo, sigCycle, compileSig, losOf, connPose, getConn, mapLane, mulberry32, pruneNodes };
+  nearNode, projectOnRoad, latOf, ringTheta, nodeAtOrSplit, splitRoad, buildGraph, sigState, sigInfo, sigCycle, compileSig, losOf, connPose, getConn, mapLane, mulberry32, pruneNodes };
 if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.RS = api;
 })(typeof self !== 'undefined' ? self : this);
 
@@ -1015,7 +1202,8 @@ const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
 const W = RS.W;
 const STORE = 'roadsim.v1';
-const DEF_OPT = { flow: 300, truck: 8, wL: 20, wS: 60, wR: 20, seed: 1 };
+const DEF_OPT = { flow: 300, truck: 8, moto: 25, hook: true, wL: 20, wS: 60, wR: 20, seed: 1 };
+const DEF_MAP = { mode: 'none', op: 70, lat: 25.0478, lon: 121.5170, imgW: 600 };
 
 let net = RS.createNet();
 let opt = Object.assign({}, DEF_OPT);
@@ -1024,6 +1212,7 @@ const props = { lanes: 1, limit: 50, oneway: false };
 const ui = { tool: 'select', color: 'speed', overlay: 'none', running: true, speed: 1, metric: 'v',
   sel: null, hover: null, drawing: null, cur: null, shift: false, chain: false, timer: true, arrows: true };
 const view = { x: 0, y: 0, z: 1.2 };
+let map = Object.assign({}, DEF_MAP), mapImg = null;
 const undoS = [], redoS = [];
 let nodeRows = [], edgeSt = [], edgeStT = 0;
 
@@ -1060,6 +1249,7 @@ function snap() { return JSON.stringify(net); }
 function edit(fn) {
   const before = snap();
   if (fn() === false) { net = JSON.parse(before); return false; }
+  if (snap() === before) { commit(); return true; }        // nothing actually changed: no undo step
   undoS.push(before); if (undoS.length > 100) undoS.shift(); redoS.length = 0;
   commit(); return true;
 }
@@ -1072,7 +1262,7 @@ function updateButtons() {
 let saveT = 0;
 function scheduleSave() {
   clearTimeout(saveT);
-  saveT = setTimeout(() => { try { localStorage.setItem(STORE, JSON.stringify({ v: 1, net, opt })); } catch (e) {} }, 400);
+  saveT = setTimeout(() => { try { localStorage.setItem(STORE, JSON.stringify({ v: 1, net, opt, map })); } catch (e) {} }, 400);
 }
 function sanitize(data) {
   if (!data || !data.net || !Array.isArray(data.net.nodes) || !Array.isArray(data.net.roads)) throw new Error('格式不符：找不到 net.nodes / net.roads');
@@ -1083,7 +1273,8 @@ function sanitize(data) {
     const ph = v => { v = Math.round(+v || 0); return v <= 0 ? 0 : clamp(v, 5, 60); };
     const sg = a.sig && isFinite(a.sig.g0) ? { g0: clamp(+a.sig.g0, 5, 120), g1: clamp(+a.sig.g1, 5, 120), lA: ph(a.sig.lA), lB: ph(a.sig.lB), rA: ph(a.sig.rA), rB: ph(a.sig.rB),
       y: clamp(+a.sig.y, 1, 6), r: clamp(+a.sig.r, 0, 6), off: clamp(+a.sig.off || 0, 0, 300), timer: a.sig.timer !== false } : null;
-    n.nodes.push({ id: +a.id, x: +a.x, y: +a.y, sig: sg, flow: a.flow != null && isFinite(a.flow) ? Math.max(0, +a.flow) : null });
+    n.nodes.push({ id: +a.id, x: +a.x, y: +a.y, sig: sg, ring: a.ring > 0 ? clamp(+a.ring, 6, 60) : 0,
+      flow: a.flow != null && isFinite(a.flow) ? Math.max(0, +a.flow) : null });
     ids.add(+a.id); n.nid = Math.max(n.nid, +a.id + 1);
   }
   for (const r of data.net.roads) {
@@ -1092,13 +1283,18 @@ function sanitize(data) {
     n.rid = Math.max(n.rid, (+r.id || 0) + 1, n.roads.length + 1);
   }
   RS.pruneNodes(n);
-  return { net: n, opt: Object.assign({}, DEF_OPT, data.opt || {}) };
+  const mp = Object.assign({}, DEF_MAP, data.map || {});
+  mp.lat = clamp(+mp.lat || DEF_MAP.lat, -85, 85); mp.lon = clamp(+mp.lon || DEF_MAP.lon, -180, 180);
+  mp.op = clamp(+mp.op || 70, 10, 100); mp.imgW = clamp(+mp.imgW || 600, 50, 2000);
+  if (['none', 'osm', 'img'].indexOf(mp.mode) < 0) mp.mode = 'none';
+  if (mp.mode === 'img' && !mapImg) mp.mode = 'none';
+  return { net: n, opt: Object.assign({}, DEF_OPT, data.opt || {}), map: mp };
 }
 function applyData(data, keepUndo) {
   const s = sanitize(data);
   if (keepUndo) { undoS.push(snap()); redoS.length = 0; } else { undoS.length = 0; redoS.length = 0; }
-  net = s.net; opt = s.opt; ui.sel = null; ui.drawing = null;
-  syncOptUI(); commit(); fitView();
+  net = s.net; opt = s.opt; map = s.map; ui.sel = null; ui.drawing = null;
+  syncGeo(); syncOptUI(); syncMapUI(); commit(); fitView();
 }
 
 /* ------------------------------------------------------------------ */
@@ -1122,6 +1318,9 @@ const TEMPLATES = {
   grid() { const n = RS.createNet(), p = { lanes: 1, limit: 50, oneway: false };
     for (const v of [-150, 150]) { RS.addSegment(n, -350, v, 350, v, p); RS.addSegment(n, v, -350, v, 350, p); }
     sigAll(n, 30); return n; },
+  round() { const n = RS.createNet();
+    for (let q = 0; q < 4; q++) { const a = q * Math.PI / 2; RS.addSegment(n, 0, 0, Math.cos(a) * 280, Math.sin(a) * 280, { lanes: 1, limit: 50, oneway: false }); }
+    const c = RS.nearNode(n, 0, 0, 5); if (c) c.ring = 14; return n; },
   blank() { return RS.createNet(); }
 };
 function loadTemplate(key) {
@@ -1156,6 +1355,121 @@ function zoomAt(sx, sy, f) {
   const p = s2w(sx, sy); view.z = clamp(view.z * f, 0.15, 14);
   view.x = p.x - (sx - cw / 2) / view.z; view.y = p.y - (sy - ch / 2) / view.z;
 }
+
+/* ------------------------------------------------------------------ */
+/* basemap (OpenStreetMap tiles, or a user-supplied image)             */
+/* ------------------------------------------------------------------ */
+const R_E = 6378137, D2R = Math.PI / 180, TAU_R = 2 * Math.PI * R_E;
+const geoC = { cos: 1, mx: 0, my: 0 };
+function syncGeo() {
+  geoC.cos = Math.cos(clamp(map.lat, -85, 85) * D2R);
+  geoC.mx = R_E * map.lon * D2R;
+  const ph = clamp(map.lat, -85.05, 85.05) * D2R;
+  geoC.my = R_E * Math.log(Math.tan(Math.PI / 4 + ph / 2));
+}
+function w2geo(wx, wy) {
+  const mx = geoC.mx + wx / geoC.cos, my = geoC.my - wy / geoC.cos;
+  return { lon: mx / R_E / D2R, lat: (2 * Math.atan(Math.exp(my / R_E)) - Math.PI / 2) / D2R };
+}
+const tiles = new Map(); let tileOK = 0, tileBad = 0;
+function tileImg(z, x, y) {
+  const k = z + '/' + x + '/' + y; let im = tiles.get(k); if (im) return im;
+  im = new Image(); im.crossOrigin = 'anonymous';
+  im.onload = () => { im.ok = true; tileOK++; mapNote(); };
+  im.onerror = () => { im.bad = true; tileBad++; mapNote(); };
+  im.src = 'https://tile.openstreetmap.org/' + z + '/' + x + '/' + y + '.png';
+  tiles.set(k, im);
+  if (tiles.size > 800) { const it = tiles.keys(); for (let q = 0; q < 250; q++) { const kk = it.next().value; if (kk) tiles.delete(kk); } }
+  return im;
+}
+function mapNote() {
+  const el = $('#mapNote');
+  if (map.mode === 'osm' && tileBad > 3 && tileOK === 0) {
+    el.style.display = 'block';
+    el.innerHTML = '外部圖磚無法載入。此預覽環境禁止外部圖片，請改用「自訂圖片」，或在自己的網站／GitHub Pages 開啟。';
+  } else el.style.display = 'none';
+}
+function drawBase() {
+  if (map.mode === 'img') {
+    if (!mapImg || !mapImg.ok) return;
+    const w = map.imgW, h = w * (mapImg.naturalHeight / Math.max(1, mapImg.naturalWidth));
+    ctx.globalAlpha = map.op / 100; ctx.drawImage(mapImg, -w / 2, -h / 2, w, h); ctx.globalAlpha = 1;
+    return;
+  }
+  if (map.mode !== 'osm') return;
+  let z = Math.round(Math.log2(Math.max(1e-6, TAU_R * geoC.cos * view.z / 256)));
+  z = clamp(z, 2, 19);
+  const n = Math.pow(2, z), tw = TAU_R * geoC.cos / n;
+  const idx = (wx, wy) => {
+    const mx = geoC.mx + wx / geoC.cos, my = geoC.my - wy / geoC.cos;
+    return [(mx / R_E + Math.PI) / (2 * Math.PI) * n, (Math.PI - my / R_E) / (2 * Math.PI) * n];
+  };
+  const a = idx(view.x - cw / 2 / view.z, view.y - ch / 2 / view.z), b = idx(view.x + cw / 2 / view.z, view.y + ch / 2 / view.z);
+  const i0 = Math.floor(a[0]), i1 = Math.floor(b[0]), j0 = Math.max(0, Math.floor(a[1])), j1 = Math.min(n - 1, Math.floor(b[1]));
+  if ((i1 - i0 + 1) * (j1 - j0 + 1) > 420) return;
+  ctx.globalAlpha = map.op / 100;
+  for (let i = i0; i <= i1; i++) {
+    const xi = ((i % n) + n) % n;
+    for (let j = j0; j <= j1; j++) {
+      const im = tileImg(z, xi, j); if (!im.ok) continue;
+      const mx = (i / n * 2 * Math.PI - Math.PI) * R_E, my = (Math.PI - j / n * 2 * Math.PI) * R_E;
+      ctx.drawImage(im, (mx - geoC.mx) * geoC.cos, (geoC.my - my) * geoC.cos, tw * 1.004, tw * 1.004);
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+function syncMapUI() {
+  $('#baseSel').value = map.mode; $('#rOpa').value = map.op; $('#oOpa').textContent = map.op + '%';
+  $('#rImgW').value = map.imgW; $('#oImgW').textContent = map.imgW;
+  $('#geoRow').style.display = map.mode === 'osm' ? '' : 'none';
+  $('#imgRow').style.display = map.mode === 'img' ? '' : 'none';
+  $('#imgW').style.display = map.mode === 'img' ? '' : 'none';
+  $('#attrib').style.display = map.mode === 'osm' ? 'block' : 'none';
+  mapNote();
+}
+$('#baseSel').addEventListener('change', e => {
+  map.mode = e.target.value;
+  if (map.mode === 'img' && !mapImg) $('#imgFile').click();
+  syncMapUI(); scheduleSave();
+});
+$('#rOpa').addEventListener('input', e => { map.op = +e.target.value; $('#oOpa').textContent = map.op + '%'; scheduleSave(); });
+$('#rImgW').addEventListener('input', e => { map.imgW = +e.target.value; $('#oImgW').textContent = map.imgW; scheduleSave(); });
+$('#imgFile').addEventListener('change', e => {
+  const f = e.target.files && e.target.files[0]; e.target.value = '';
+  if (!f) return;
+  const im = new Image();
+  im.onload = () => { im.ok = true; mapImg = im; map.mode = 'img'; syncMapUI(); toast('底圖已載入，可用「圖寬」調整比例'); };
+  im.onerror = () => toast('這個檔案無法當作圖片載入');
+  im.src = URL.createObjectURL(f);
+});
+$('#geoBtn').addEventListener('click', () => {
+  $('#geoLat').value = map.lat.toFixed(6); $('#geoLon').value = map.lon.toFixed(6);
+  $('#geoMsg').textContent = ''; $('#geoUrl').value = '';
+  $('#geoModal').classList.add('show');
+});
+function parseLatLon(u) {
+  const pats = [/#map=[\d.]+\/(-?\d+\.\d+)\/(-?\d+\.\d+)/, /@(-?\d+\.\d+),(-?\d+\.\d+)/, /!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/,
+    /[?&](?:q|ll|mlat)=(-?\d+\.\d+)[,&](?:.*mlon=)?(-?\d+\.\d+)/, /(-?\d{1,2}\.\d{4,})\s*,\s*(-?\d{1,3}\.\d{4,})/];
+  for (const p of pats) { const m = u.match(p); if (m) return { lat: +m[1], lon: +m[2] }; }
+  return null;
+}
+$('#geoParse').addEventListener('click', () => {
+  const r = parseLatLon($('#geoUrl').value || '');
+  if (!r || Math.abs(r.lat) > 85 || Math.abs(r.lon) > 180) { $('#geoMsg').textContent = '這段網址裡找不到座標，請改用手動輸入。'; return; }
+  $('#geoLat').value = r.lat.toFixed(6); $('#geoLon').value = r.lon.toFixed(6); $('#geoMsg').textContent = '已讀取座標。';
+});
+$('#geoPreset').addEventListener('change', e => {
+  if (!e.target.value) return;
+  const [la, lo] = e.target.value.split(',');
+  $('#geoLat').value = la; $('#geoLon').value = lo; e.target.value = '';
+});
+$('#geoOk').addEventListener('click', () => {
+  const la = +$('#geoLat').value, lo = +$('#geoLon').value;
+  if (!isFinite(la) || !isFinite(lo) || Math.abs(la) > 85 || Math.abs(lo) > 180) { $('#geoMsg').textContent = '座標格式不正確。'; return; }
+  map.lat = la; map.lon = lo; map.mode = 'osm'; tileOK = 0; tileBad = 0; tiles.clear();
+  syncGeo(); syncMapUI(); scheduleSave();
+  $('#geoModal').classList.remove('show');
+});
 
 /* ------------------------------------------------------------------ */
 /* picking & snapping                                                  */
@@ -1208,7 +1522,7 @@ function updateHud() {
   const m = {
     select: '<b>選取／移動</b>　點道路或節點查看屬性，拖曳節點可移動，拖曳空白處平移',
     draw: ui.drawing ? '<b>畫路中</b>　點下一點延伸；<b>雙擊／Enter／右鍵</b>結束，Esc 取消，Shift 吸附角度' : '<b>畫路</b>　點一下設定起點（可從既有道路上起畫，會自動形成路口）',
-    signal: '<b>號誌</b>　點擊三向以上的路口，開關號誌',
+    signal: '<b>號誌／圓環</b>　連點三向以上的路口可循環切換：讓行 → 號誌 → 圓環',
     delete: '<b>刪除</b>　點道路刪除該路段；點路口／端點刪除其所有連接道路'
   };
   $('#hud').innerHTML = m[ui.tool];
@@ -1223,10 +1537,12 @@ function placePoint(p) {
   if (ok) ui.drawing = { x: p.x, y: p.y };
   updateHud();
 }
-function toggleSignal(id) {
+function cycleNode(id) {
   const n = nodeById(id); if (!n) return;
-  if (RS.nodeDegree(net, id) < 3) { toast('號誌只能設在三向以上的路口'); return; }
-  edit(() => { n.sig = n.sig ? null : RS.defaultSig(); });
+  if (RS.nodeDegree(net, id) < 3) { toast('號誌與圓環只能設在三向以上的路口'); return; }
+  const next = n.ring > 0 ? 'plain' : (n.sig ? 'ring' : 'sig');
+  edit(() => { n.sig = next === 'sig' ? RS.defaultSig() : null; n.ring = next === 'ring' ? (n.ring || 14) : 0; });
+  toast(next === 'sig' ? '已設為號誌路口' : (next === 'ring' ? '已設為圓環' : '已改為讓行路口'));
   ui.sel = { type: 'node', id }; renderInspector();
 }
 function deleteSel(s) {
@@ -1318,7 +1634,7 @@ function clickAt(sx, sy, e) {
     placePoint(snapPoint(w.x, w.y, e.shiftKey));
   } else if (ui.tool === 'signal') {
     const h = pick(w.x, w.y);
-    if (h && h.type === 'node') toggleSignal(h.id);
+    if (h && h.type === 'node') cycleNode(h.id);
     else toast('請點擊三向以上的路口');
   } else if (ui.tool === 'delete') {
     const h = pick(w.x, w.y, true); if (h) { if (ui.sel && ui.sel.type === h.type && ui.sel.id === h.id) ui.sel = null; deleteSel(h); }
@@ -1381,9 +1697,15 @@ function renderInspector1() {
         const c = RS.compileSig(Object.assign({}, sg));
         prog = '<div class="phase">' + c.ph.map(p => `<span class="${p.group ? 'b' : ''}">${p.group ? 'B' : 'A'} ${p.mv === 'L' ? '左轉專用' : (p.mv === 'R' ? '右轉專用' : '直行' + (p.mv.includes('L') ? '＋左' : '') + (p.mv.includes('R') ? '＋右' : ''))} ${p.dur}s</span>`).join('') + '</div>';
       }
+      const kind = n.ring > 0 ? 'ring' : (sg ? 'sig' : 'plain');
       h = `<div class="card"><h3>路口 #${n.id}</h3>
         <div class="kv"><span>連接道路</span><b>${deg} 條</b></div>
-        <label class="chk"><input type="checkbox" data-act="sig" ${sg ? 'checked' : ''}>啟用號誌</label>
+        <div class="field"><label>路口型態</label><div class="seg" data-act="ntype">
+          ${[['plain', '讓行'], ['sig', '號誌'], ['ring', '圓環']].map(([v, t]) => `<button data-v="${v}" class="${kind === v ? 'on' : ''}">${t}</button>`).join('')}</div></div>
+        ${kind === 'ring' ? `<div class="field"><label>圓環半徑</label><input type="number" data-act="ringR" min="6" max="60" step="1" value="${n.ring}"></div>
+        <div class="kv"><span>環道周長</span><b class="num">${fmt(2 * Math.PI * n.ring, 0)} m</b></div>
+        <div class="hint">車輛逆時針繞行單一環道，進環車輛讓行環內車輛。半徑越大繞行速度越快、容量越高；approach 車道再多，環內仍只有一條車道。</div>` : ''}
+        ${kind === 'plain' ? '<div class="hint">依讓行規則通過：左轉讓直行與右轉、先到先走。</div>' : ''}
         ${sg ? `<label class="chk"><input type="checkbox" data-act="timer" ${sg.timer !== false ? 'checked' : ''}>顯示這個路口的倒數秒數</label>
         <div class="sub">直行綠燈（秒）</div>
         ${num('g0', 'A 軸', 5, 120)}${num('g1', 'B 軸', 5, 120)}
@@ -1396,7 +1718,7 @@ function renderInspector1() {
         <div class="kv"><span>週期</span><b class="num">${RS.sigCycle(Object.assign({}, sg))} s</b></div>
         <div class="sub">相位順序</div>${prog}
         <div class="hint">A／B 是互相垂直的兩個方向軸，標籤顯示在畫面上各進口道旁。未設專用相位時，左轉在直行綠燈內讓行；設了專用相位，該軸左／右轉只在自己的相位才放行，紅燈（含右轉）一律停等。方向有 2 條以上車道時，最內側車道會成為左轉專用道（右轉專用需再多一條車道），單車道會共用車道。</div>`
-        : '<div class="hint">未啟用號誌：車輛依讓行規則通過（左轉讓直行與右轉、先到先走）。</div>'}
+        : ''}
         <button class="btn danger block" style="margin-top:10px" data-act="delNode">刪除此路口與相連道路</button></div>`;
     }
   }
@@ -1405,6 +1727,12 @@ function renderInspector1() {
 $('#insp').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b || !ui.sel) return;
   const act = (b.closest('[data-act]') || b).dataset.act;
+  if (act === 'ntype') {
+    const v = b.dataset.v, n = nodeById(ui.sel.id); if (!n) return;
+    if (v === 'ring' && RS.nodeDegree(net, n.id) < 3) { toast('圓環需要三向以上的路口'); return; }
+    edit(() => { n.sig = v === 'sig' ? (n.sig || RS.defaultSig()) : null; n.ring = v === 'ring' ? (n.ring || 14) : 0; });
+    renderInspector(); return;
+  }
   if (act === 'lanes') {
     const v = +b.dataset.v, r = roadById(ui.sel.id); if (!r) return;
     const ids = ui.chain ? chainOf(r.id) : [r.id];
@@ -1427,6 +1755,8 @@ $('#insp').addEventListener('change', e => {
     edit(() => { n.flow = raw === '' ? null : clamp(+raw || 0, 0, 3000); });
   } else if (act === 'sig') {
     const n = nodeById(ui.sel.id); edit(() => { n.sig = t.checked ? RS.defaultSig() : null; });
+  } else if (act === 'ringR') {
+    const n = nodeById(ui.sel.id); edit(() => { n.ring = clamp(Math.round(+t.value || 14), 6, 60); }); renderInspector();
   } else if (act === 'timer') {
     const n = nodeById(ui.sel.id); edit(() => { n.sig.timer = t.checked; });
   } else if (act === 'sg') {
@@ -1439,19 +1769,20 @@ $('#insp').addEventListener('change', e => {
 /* global controls                                                     */
 /* ------------------------------------------------------------------ */
 function syncOptUI() {
-  $('#rFlow').value = opt.flow; $('#rTruck').value = opt.truck;
+  $('#rFlow').value = opt.flow; $('#rTruck').value = opt.truck; $('#rMoto').value = opt.moto; $('#hookChk').checked = opt.hook !== false;
   $('#rL').value = opt.wL; $('#rS').value = opt.wS; $('#rR').value = opt.wR; $('#seed').value = opt.seed;
   updateOptLabels();
 }
 function updateOptLabels() {
-  $('#oFlow').textContent = opt.flow; $('#oTruck').textContent = opt.truck + '%';
+  $('#oFlow').textContent = opt.flow; $('#oTruck').textContent = opt.truck + '%'; $('#oMoto').textContent = opt.moto + '%';
   const t = (opt.wL + opt.wS + opt.wR) || 1;
   $('#oL').textContent = Math.round(opt.wL / t * 100) + '%'; $('#oS').textContent = Math.round(opt.wS / t * 100) + '%'; $('#oR').textContent = Math.round(opt.wR / t * 100) + '%';
 }
 function liveOpt() { if (sim) Object.assign(sim.opt, opt); updateOptLabels(); scheduleSave(); }
-[['rFlow', 'flow'], ['rTruck', 'truck'], ['rL', 'wL'], ['rS', 'wS'], ['rR', 'wR']].forEach(([id, k]) => {
+[['rFlow', 'flow'], ['rTruck', 'truck'], ['rMoto', 'moto'], ['rL', 'wL'], ['rS', 'wS'], ['rR', 'wR']].forEach(([id, k]) => {
   $('#' + id).addEventListener('input', e => { opt[k] = +e.target.value; liveOpt(); if (k === 'flow') { const s = ui.sel; if (s && s.type === 'node') { const i = $('#insp [data-act=nflow]'); if (i) i.placeholder = '預設 ' + opt.flow; } } });
 });
+$('#hookChk').addEventListener('change', e => { opt.hook = e.target.checked; liveOpt(); });
 $('#seedBtn').addEventListener('click', () => {
   opt.seed = clamp(Math.round(+$('#seed').value) || 1, 1, 999999); $('#seed').value = opt.seed; commit();
 });
@@ -1519,7 +1850,7 @@ window.addEventListener('keydown', e => {
 /* ------------------------------------------------------------------ */
 function svMsg(t, bad) { const m = $('#svMsg'); m.textContent = t; m.style.color = bad ? 'var(--bad)' : 'var(--muted)'; }
 $('#saveBtn').addEventListener('click', () => { $('#saveModal').classList.add('show'); $('#svGen').click(); });
-$('#svGen').addEventListener('click', () => { $('#svText').value = JSON.stringify({ v: 1, net, opt }, null, 1); svMsg('已產生目前路網（' + net.roads.length + ' 段道路）。'); });
+$('#svGen').addEventListener('click', () => { $('#svText').value = JSON.stringify({ v: 1, net, opt, map }, null, 1); svMsg('已產生目前路網（' + net.roads.length + ' 段道路）。'); });
 $('#svCopy').addEventListener('click', async () => {
   const ta = $('#svText'); ta.focus(); ta.select();
   try { await navigator.clipboard.writeText(ta.value); svMsg('已複製到剪貼簿。'); }
@@ -1538,8 +1869,8 @@ $('#svFile').addEventListener('change', e => {
 $('#svCsv').addEventListener('click', () => {
   const rows = ['時間(s),路網車輛,平均車速(km/h),通過量(veh/h),平均延滯(s),待進車輛'];
   for (const p of sim.series) rows.push([p.t.toFixed(0), p.n, p.v.toFixed(1), p.thr.toFixed(0), p.delay.toFixed(1), p.vq].join(','));
-  rows.push(''); rows.push('路口,號誌,流量(veh/h),平均延滯(s),LOS,最大排隊(m),平均排隊(m)');
-  for (const r of sim.nodeTable()) rows.push([r.id, r.signal ? '有' : '無', r.flow.toFixed(0), r.delay.toFixed(1), r.los, r.maxQ.toFixed(0), r.avgQ.toFixed(1)].join(','));
+  rows.push(''); rows.push('路口,型態,流量(veh/h),平均延滯(s),LOS,最大排隊(m),平均排隊(m)');
+  for (const r of sim.nodeTable()) rows.push([r.id, r.ring ? '圓環' : (r.signal ? '號誌' : '讓行'), r.flow.toFixed(0), r.delay.toFixed(1), r.los, r.maxQ.toFixed(0), r.avgQ.toFixed(1)].join(','));
   $('#svText').value = rows.join('\n'); svMsg('已產生指標 CSV，可按「複製」後貼進試算表。');
 });
 
@@ -1582,10 +1913,19 @@ function drawRoads() {
   ctx.fill();
   ctx.beginPath();
   for (const gn of g.nodes.values()) {
-    if (gn.deg >= 3) { ctx.moveTo(gn.x + gn.R * 0.85, gn.y); ctx.arc(gn.x, gn.y, gn.R * 0.85, 0, 7); }
-    else if (gn.deg === 2) { ctx.moveTo(gn.x + gn.maxLanes * W, gn.y); ctx.arc(gn.x, gn.y, gn.maxLanes * W, 0, 7); }
+    const r = gn.ring ? gn.R : (gn.deg >= 3 ? gn.R * 0.85 : (gn.deg === 2 ? gn.maxLanes * W : 0));
+    if (r > 0) { ctx.moveTo(gn.x + r, gn.y); ctx.arc(gn.x, gn.y, r, 0, 7); }
   }
   ctx.fill();
+  for (const gn of g.nodes.values()) {                       // roundabout island
+    if (!gn.ring) continue;
+    const ri = Math.max(1.5, gn.ring - W * 0.8);
+    ctx.fillStyle = map.mode === 'none' ? COL.bg : 'rgba(228,240,228,.95)';
+    ctx.beginPath(); ctx.arc(gn.x, gn.y, ri, 0, 7); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = 0.35; ctx.stroke();
+    ctx.fillStyle = 'rgba(31,210,122,.5)'; ctx.beginPath(); ctx.arc(gn.x, gn.y, Math.max(0.8, ri - 1.2), 0, 7); ctx.fill();
+    ctx.fillStyle = COL.asphalt;
+  }
   if (ui.overlay !== 'none') {
     if (performance.now() - edgeStT > 200) { edgeSt = sim.edgeStats(); edgeStT = performance.now(); }
     const bins = {};
@@ -1623,7 +1963,7 @@ function drawMarks() {
     }
     ctx.stroke();
   }
-  if (ui.arrows) drawArrows();
+  if (ui.arrows) { drawArrows(); drawBoxes(); }
   // stop lines (one segment per lane, coloured by that lane's movement)
   ctx.lineCap = 'butt';
   for (const e of g.edges) {
@@ -1654,13 +1994,29 @@ function arrowPath(mv) {
     head(ex, ey, Math.atan2(sgn * 1.0, 0.55));
   }
 }
+/* motorcycle two-stage left-turn waiting boxes */
+function drawBoxes() {
+  const z = view.z; if (z < 1.2 || !opt.hook) return;
+  ctx.globalAlpha = clamp((z - 1.2) / 0.8, 0, 1) * 0.9;
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 0.3; ctx.setLineDash([1.1, 0.9]);
+  for (const gn of sim.g.nodes.values()) {
+    if (!gn.sig || gn.ring) continue;
+    for (const oe of gn.out) {
+      const l0 = oe.lanes * W - 3.1, l1 = oe.lanes * W - 0.1, f0 = -3.4, f1 = 2.0;
+      const pt = (f, l) => [oe.sx + oe.dx * f + oe.nx * l, oe.sy + oe.dy * f + oe.ny * l];
+      const a = pt(f0, l0), b = pt(f1, l0), c2 = pt(f1, l1), d = pt(f0, l1);
+      ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.lineTo(c2[0], c2[1]); ctx.lineTo(d[0], d[1]); ctx.closePath(); ctx.stroke();
+    }
+  }
+  ctx.setLineDash([]); ctx.globalAlpha = 1;
+}
 function drawArrows() {
   const z = view.z; if (z < 1.3) return;
   const alpha = clamp((z - 1.3) / 1.0, 0, 1);
   const x0 = view.x - cw / 2 / z - 10, x1 = view.x + cw / 2 / z + 10, y0 = view.y - ch / 2 / z - 10, y1 = view.y + ch / 2 / z + 10;
   ctx.globalAlpha = alpha * 0.95; ctx.fillStyle = ctx.strokeStyle = '#fff'; ctx.lineWidth = 0.34; ctx.lineJoin = 'miter'; ctx.lineCap = 'butt';
   for (const e of sim.g.edges) {
-    const gn = e.b; if (gn.deg < 3 || !e.lm || e.len < 24) continue;
+    const gn = e.b; if (gn.deg < 3 || gn.ring || !e.lm || e.len < 24) continue;
     if (Math.max(e.sx, e.ex) < x0 || Math.min(e.sx, e.ex) > x1 || Math.max(e.sy, e.ey) < y0 || Math.min(e.sy, e.ey) > y1) continue;
     const poss = [e.len - 11]; if (e.len > 75 && z > 2.6) poss.push(e.len - 40);
     for (let li = 0; li < e.lanes; li++) {
@@ -1680,21 +2036,29 @@ function drawVehicles() {
   const dot = z < 0.7;
   for (let i = 0; i < vs.length; i++) {
     const v = vs[i]; let fx, fy, ang;
-    if (v.conn) { const p = RS.connPose(v.conn, v.cs); fx = p.x; fy = p.y; ang = p.ang; }
+    if (v.conn) {
+      const p = RS.connPose(v.conn, v.cs); fx = p.x; fy = p.y; ang = p.ang;
+      if (v.hookWait && v.conn.box) {                       // turned to face the cross street while waiting
+        const tg = v.conn.box.ang;
+        if (v.bang == null) v.bang = ang;
+        v.bang += Math.atan2(Math.sin(tg - v.bang), Math.cos(tg - v.bang)) * 0.12;
+        ang = v.bang;
+      }
+    }
     else { const e = v.e; fx = e.sx + e.dx * v.s + e.nx * v.lat; fy = e.sy + e.dy * v.s + e.ny * v.lat; ang = e.ang; }
     const ca = Math.cos(ang), sa = Math.sin(ang), hl = v.len / 2;
     const mx = fx - ca * hl, my = fy - sa * hl;
     if (mx < cx0 || mx > cx1 || my < cy0 || my > cy1) continue;
-    const key = byType ? (v.type === 'truck' ? 'T' : 'C') : Math.round(clamp(v.v / Math.max(v.e.limit, 1), 0, 1) * 9);
+    const key = byType ? (v.type === 'truck' ? 'T' : (v.moto ? 'M' : 'C')) : Math.round(clamp(v.v / Math.max(v.e.limit, 1), 0, 1) * 9);
     let b = buckets.get(key); if (!b) { b = []; buckets.set(key, b); }
     b.push(mx, my, ca, sa, hl, v.wid / 2);
   }
   buckets.forEach((arr, key) => {
-    ctx.fillStyle = byType ? (key === 'T' ? '#ff9f1c' : '#7c5cff') : SPEED_COL[key];
+    ctx.fillStyle = byType ? (key === 'T' ? '#ff9f1c' : (key === 'M' ? '#ff4d9d' : '#7c5cff')) : SPEED_COL[key];
     ctx.beginPath();
     for (let i = 0; i < arr.length; i += 6) {
       const x = arr[i], y = arr[i + 1], ca = arr[i + 2], sa = arr[i + 3], hl = arr[i + 4], hw = arr[i + 5];
-      if (dot) { const r = Math.max(hl, 1.6 / z); ctx.rect(x - r / 1.5, y - r / 1.5, r * 1.3, r * 1.3); continue; }
+      if (dot) { const r = Math.max(hl, 1.4 / z); ctx.rect(x - r / 1.5, y - r / 1.5, r * 1.3, r * 1.3); continue; }
       const lx = ca * hl, ly = sa * hl, wx = -sa * hw, wy = ca * hw;
       ctx.moveTo(x - lx - wx, y - ly - wy); ctx.lineTo(x + lx - wx, y + ly - wy); ctx.lineTo(x + lx + wx, y + ly + wy); ctx.lineTo(x - lx + wx, y - ly + wy); ctx.closePath();
     }
@@ -1770,7 +2134,7 @@ function drawLabels() {
     if (sx < -60 || sx > cw + 60 || sy < -60 || sy > ch + 60) continue;
     if (gn.deg >= 3 && view.z > 0.3) {
       const r = byId.get(gn.id), los = r && r.n >= 3 ? r.los : null;
-      pill('#' + gn.id + (gn.sig ? ' 號誌' : '') + (los ? ' · ' + los : ''), sx, sy - gn.R * 0.85 * view.z - 12, '#fffdf6', los ? LOSC[los] : '#6d6788');
+      pill('#' + gn.id + (gn.ring ? ' 圓環' : (gn.sig ? ' 號誌' : '')) + (los ? ' · ' + los : ''), sx, sy - gn.R * 0.85 * view.z - 12, '#fffdf6', los ? LOSC[los] : '#6d6788');
       // countdown / phase tags beside every approach
       if (gn.sig && view.z > 0.45 && ((ui.timer && gn.sig.timer !== false) || gn.id === selId)) {
         const showNum = ui.timer && gn.sig.timer !== false, c = RS.compileSig(gn.sig);
@@ -1806,9 +2170,9 @@ function drawLabels() {
   }
 }
 function render() {
-  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = COL.bg; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = map.mode === 'none' ? COL.bg : '#f2f1ee'; ctx.fillRect(0, 0, cv.width, cv.height);
   const z = view.z; ctx.setTransform(dpr * z, 0, 0, dpr * z, dpr * (cw / 2 - view.x * z), dpr * (ch / 2 - view.y * z));
-  drawGrid(); drawRoads(); drawMarks(); drawVehicles(); drawOverlays(); drawLabels();
+  drawBase(); if (map.mode === 'none') drawGrid(); drawRoads(); drawMarks(); drawVehicles(); drawOverlays(); drawLabels();
 }
 
 /* ------------------------------------------------------------------ */
@@ -1866,7 +2230,7 @@ function updateTable() {
   const sel = ui.sel && ui.sel.type === 'node' ? ui.sel.id : -1;
   $('#nodeTbl').innerHTML = nodeRows.map(r => {
     const lc = r.n >= 3 ? r.los : 'n';
-    return `<tr data-id="${r.id}" class="${r.id === sel ? 'sel' : ''}"><td>#${r.id} ${r.signal ? '號誌' : '無號誌'}</td><td>${fmt(r.flow, 0)}</td><td>${r.n >= 3 ? fmt(r.delay, 1) : '–'}</td><td><span class="los ${lc}">${r.n >= 3 ? r.los : '–'}</span></td><td>${fmt(r.maxQ, 0)}</td></tr>`;
+    return `<tr data-id="${r.id}" class="${r.id === sel ? 'sel' : ''}"><td>#${r.id} ${r.ring ? '圓環' : (r.signal ? '號誌' : '讓行')}</td><td>${fmt(r.flow, 0)}</td><td>${r.n >= 3 ? fmt(r.delay, 1) : '–'}</td><td><span class="los ${lc}">${r.n >= 3 ? r.los : '–'}</span></td><td>${fmt(r.maxQ, 0)}</td></tr>`;
   }).join('');
 }
 $('#nodeTbl').addEventListener('click', e => {
@@ -1905,9 +2269,9 @@ function init() {
   let data = null;
   try { const s = localStorage.getItem(STORE); if (s) data = JSON.parse(s); } catch (e) {}
   let ok = false;
-  if (data) { try { const s = sanitize(data); if (s.net.roads.length) { net = s.net; opt = s.opt; ok = true; } } catch (e) {} }
+  if (data) { try { const s = sanitize(data); if (s.net.roads.length) { net = s.net; opt = s.opt; map = s.map; ok = true; } } catch (e) {} }
   if (!ok) net = TEMPLATES.cross();
-  syncOptUI(); resize(); newSim(); fitView(); setTool('select'); renderInspector(); updateButtons();
+  syncGeo(); syncOptUI(); syncMapUI(); resize(); newSim(); fitView(); setTool('select'); renderInspector(); updateButtons();
   new ResizeObserver(() => { resize(); }).observe(cv.parentElement);
   window.addEventListener('resize', resize);
   for (let i = 0; i < 20; i++) sim.step();

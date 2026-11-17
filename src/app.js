@@ -4,7 +4,8 @@ const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
 const W = RS.W;
 const STORE = 'roadsim.v1';
-const DEF_OPT = { flow: 300, truck: 8, wL: 20, wS: 60, wR: 20, seed: 1 };
+const DEF_OPT = { flow: 300, truck: 8, moto: 25, hook: true, wL: 20, wS: 60, wR: 20, seed: 1 };
+const DEF_MAP = { mode: 'none', op: 70, lat: 25.0478, lon: 121.5170, imgW: 600 };
 
 let net = RS.createNet();
 let opt = Object.assign({}, DEF_OPT);
@@ -13,6 +14,7 @@ const props = { lanes: 1, limit: 50, oneway: false };
 const ui = { tool: 'select', color: 'speed', overlay: 'none', running: true, speed: 1, metric: 'v',
   sel: null, hover: null, drawing: null, cur: null, shift: false, chain: false, timer: true, arrows: true };
 const view = { x: 0, y: 0, z: 1.2 };
+let map = Object.assign({}, DEF_MAP), mapImg = null;
 const undoS = [], redoS = [];
 let nodeRows = [], edgeSt = [], edgeStT = 0;
 
@@ -49,6 +51,7 @@ function snap() { return JSON.stringify(net); }
 function edit(fn) {
   const before = snap();
   if (fn() === false) { net = JSON.parse(before); return false; }
+  if (snap() === before) { commit(); return true; }        // nothing actually changed: no undo step
   undoS.push(before); if (undoS.length > 100) undoS.shift(); redoS.length = 0;
   commit(); return true;
 }
@@ -61,7 +64,7 @@ function updateButtons() {
 let saveT = 0;
 function scheduleSave() {
   clearTimeout(saveT);
-  saveT = setTimeout(() => { try { localStorage.setItem(STORE, JSON.stringify({ v: 1, net, opt })); } catch (e) {} }, 400);
+  saveT = setTimeout(() => { try { localStorage.setItem(STORE, JSON.stringify({ v: 1, net, opt, map })); } catch (e) {} }, 400);
 }
 function sanitize(data) {
   if (!data || !data.net || !Array.isArray(data.net.nodes) || !Array.isArray(data.net.roads)) throw new Error('格式不符：找不到 net.nodes / net.roads');
@@ -72,7 +75,8 @@ function sanitize(data) {
     const ph = v => { v = Math.round(+v || 0); return v <= 0 ? 0 : clamp(v, 5, 60); };
     const sg = a.sig && isFinite(a.sig.g0) ? { g0: clamp(+a.sig.g0, 5, 120), g1: clamp(+a.sig.g1, 5, 120), lA: ph(a.sig.lA), lB: ph(a.sig.lB), rA: ph(a.sig.rA), rB: ph(a.sig.rB),
       y: clamp(+a.sig.y, 1, 6), r: clamp(+a.sig.r, 0, 6), off: clamp(+a.sig.off || 0, 0, 300), timer: a.sig.timer !== false } : null;
-    n.nodes.push({ id: +a.id, x: +a.x, y: +a.y, sig: sg, flow: a.flow != null && isFinite(a.flow) ? Math.max(0, +a.flow) : null });
+    n.nodes.push({ id: +a.id, x: +a.x, y: +a.y, sig: sg, ring: a.ring > 0 ? clamp(+a.ring, 6, 60) : 0,
+      flow: a.flow != null && isFinite(a.flow) ? Math.max(0, +a.flow) : null });
     ids.add(+a.id); n.nid = Math.max(n.nid, +a.id + 1);
   }
   for (const r of data.net.roads) {
@@ -81,13 +85,18 @@ function sanitize(data) {
     n.rid = Math.max(n.rid, (+r.id || 0) + 1, n.roads.length + 1);
   }
   RS.pruneNodes(n);
-  return { net: n, opt: Object.assign({}, DEF_OPT, data.opt || {}) };
+  const mp = Object.assign({}, DEF_MAP, data.map || {});
+  mp.lat = clamp(+mp.lat || DEF_MAP.lat, -85, 85); mp.lon = clamp(+mp.lon || DEF_MAP.lon, -180, 180);
+  mp.op = clamp(+mp.op || 70, 10, 100); mp.imgW = clamp(+mp.imgW || 600, 50, 2000);
+  if (['none', 'osm', 'img'].indexOf(mp.mode) < 0) mp.mode = 'none';
+  if (mp.mode === 'img' && !mapImg) mp.mode = 'none';
+  return { net: n, opt: Object.assign({}, DEF_OPT, data.opt || {}), map: mp };
 }
 function applyData(data, keepUndo) {
   const s = sanitize(data);
   if (keepUndo) { undoS.push(snap()); redoS.length = 0; } else { undoS.length = 0; redoS.length = 0; }
-  net = s.net; opt = s.opt; ui.sel = null; ui.drawing = null;
-  syncOptUI(); commit(); fitView();
+  net = s.net; opt = s.opt; map = s.map; ui.sel = null; ui.drawing = null;
+  syncGeo(); syncOptUI(); syncMapUI(); commit(); fitView();
 }
 
 /* ------------------------------------------------------------------ */
@@ -111,6 +120,9 @@ const TEMPLATES = {
   grid() { const n = RS.createNet(), p = { lanes: 1, limit: 50, oneway: false };
     for (const v of [-150, 150]) { RS.addSegment(n, -350, v, 350, v, p); RS.addSegment(n, v, -350, v, 350, p); }
     sigAll(n, 30); return n; },
+  round() { const n = RS.createNet();
+    for (let q = 0; q < 4; q++) { const a = q * Math.PI / 2; RS.addSegment(n, 0, 0, Math.cos(a) * 280, Math.sin(a) * 280, { lanes: 1, limit: 50, oneway: false }); }
+    const c = RS.nearNode(n, 0, 0, 5); if (c) c.ring = 14; return n; },
   blank() { return RS.createNet(); }
 };
 function loadTemplate(key) {
@@ -145,6 +157,121 @@ function zoomAt(sx, sy, f) {
   const p = s2w(sx, sy); view.z = clamp(view.z * f, 0.15, 14);
   view.x = p.x - (sx - cw / 2) / view.z; view.y = p.y - (sy - ch / 2) / view.z;
 }
+
+/* ------------------------------------------------------------------ */
+/* basemap (OpenStreetMap tiles, or a user-supplied image)             */
+/* ------------------------------------------------------------------ */
+const R_E = 6378137, D2R = Math.PI / 180, TAU_R = 2 * Math.PI * R_E;
+const geoC = { cos: 1, mx: 0, my: 0 };
+function syncGeo() {
+  geoC.cos = Math.cos(clamp(map.lat, -85, 85) * D2R);
+  geoC.mx = R_E * map.lon * D2R;
+  const ph = clamp(map.lat, -85.05, 85.05) * D2R;
+  geoC.my = R_E * Math.log(Math.tan(Math.PI / 4 + ph / 2));
+}
+function w2geo(wx, wy) {
+  const mx = geoC.mx + wx / geoC.cos, my = geoC.my - wy / geoC.cos;
+  return { lon: mx / R_E / D2R, lat: (2 * Math.atan(Math.exp(my / R_E)) - Math.PI / 2) / D2R };
+}
+const tiles = new Map(); let tileOK = 0, tileBad = 0;
+function tileImg(z, x, y) {
+  const k = z + '/' + x + '/' + y; let im = tiles.get(k); if (im) return im;
+  im = new Image(); im.crossOrigin = 'anonymous';
+  im.onload = () => { im.ok = true; tileOK++; mapNote(); };
+  im.onerror = () => { im.bad = true; tileBad++; mapNote(); };
+  im.src = 'https://tile.openstreetmap.org/' + z + '/' + x + '/' + y + '.png';
+  tiles.set(k, im);
+  if (tiles.size > 800) { const it = tiles.keys(); for (let q = 0; q < 250; q++) { const kk = it.next().value; if (kk) tiles.delete(kk); } }
+  return im;
+}
+function mapNote() {
+  const el = $('#mapNote');
+  if (map.mode === 'osm' && tileBad > 3 && tileOK === 0) {
+    el.style.display = 'block';
+    el.innerHTML = '外部圖磚無法載入。此預覽環境禁止外部圖片，請改用「自訂圖片」，或在自己的網站／GitHub Pages 開啟。';
+  } else el.style.display = 'none';
+}
+function drawBase() {
+  if (map.mode === 'img') {
+    if (!mapImg || !mapImg.ok) return;
+    const w = map.imgW, h = w * (mapImg.naturalHeight / Math.max(1, mapImg.naturalWidth));
+    ctx.globalAlpha = map.op / 100; ctx.drawImage(mapImg, -w / 2, -h / 2, w, h); ctx.globalAlpha = 1;
+    return;
+  }
+  if (map.mode !== 'osm') return;
+  let z = Math.round(Math.log2(Math.max(1e-6, TAU_R * geoC.cos * view.z / 256)));
+  z = clamp(z, 2, 19);
+  const n = Math.pow(2, z), tw = TAU_R * geoC.cos / n;
+  const idx = (wx, wy) => {
+    const mx = geoC.mx + wx / geoC.cos, my = geoC.my - wy / geoC.cos;
+    return [(mx / R_E + Math.PI) / (2 * Math.PI) * n, (Math.PI - my / R_E) / (2 * Math.PI) * n];
+  };
+  const a = idx(view.x - cw / 2 / view.z, view.y - ch / 2 / view.z), b = idx(view.x + cw / 2 / view.z, view.y + ch / 2 / view.z);
+  const i0 = Math.floor(a[0]), i1 = Math.floor(b[0]), j0 = Math.max(0, Math.floor(a[1])), j1 = Math.min(n - 1, Math.floor(b[1]));
+  if ((i1 - i0 + 1) * (j1 - j0 + 1) > 420) return;
+  ctx.globalAlpha = map.op / 100;
+  for (let i = i0; i <= i1; i++) {
+    const xi = ((i % n) + n) % n;
+    for (let j = j0; j <= j1; j++) {
+      const im = tileImg(z, xi, j); if (!im.ok) continue;
+      const mx = (i / n * 2 * Math.PI - Math.PI) * R_E, my = (Math.PI - j / n * 2 * Math.PI) * R_E;
+      ctx.drawImage(im, (mx - geoC.mx) * geoC.cos, (geoC.my - my) * geoC.cos, tw * 1.004, tw * 1.004);
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+function syncMapUI() {
+  $('#baseSel').value = map.mode; $('#rOpa').value = map.op; $('#oOpa').textContent = map.op + '%';
+  $('#rImgW').value = map.imgW; $('#oImgW').textContent = map.imgW;
+  $('#geoRow').style.display = map.mode === 'osm' ? '' : 'none';
+  $('#imgRow').style.display = map.mode === 'img' ? '' : 'none';
+  $('#imgW').style.display = map.mode === 'img' ? '' : 'none';
+  $('#attrib').style.display = map.mode === 'osm' ? 'block' : 'none';
+  mapNote();
+}
+$('#baseSel').addEventListener('change', e => {
+  map.mode = e.target.value;
+  if (map.mode === 'img' && !mapImg) $('#imgFile').click();
+  syncMapUI(); scheduleSave();
+});
+$('#rOpa').addEventListener('input', e => { map.op = +e.target.value; $('#oOpa').textContent = map.op + '%'; scheduleSave(); });
+$('#rImgW').addEventListener('input', e => { map.imgW = +e.target.value; $('#oImgW').textContent = map.imgW; scheduleSave(); });
+$('#imgFile').addEventListener('change', e => {
+  const f = e.target.files && e.target.files[0]; e.target.value = '';
+  if (!f) return;
+  const im = new Image();
+  im.onload = () => { im.ok = true; mapImg = im; map.mode = 'img'; syncMapUI(); toast('底圖已載入，可用「圖寬」調整比例'); };
+  im.onerror = () => toast('這個檔案無法當作圖片載入');
+  im.src = URL.createObjectURL(f);
+});
+$('#geoBtn').addEventListener('click', () => {
+  $('#geoLat').value = map.lat.toFixed(6); $('#geoLon').value = map.lon.toFixed(6);
+  $('#geoMsg').textContent = ''; $('#geoUrl').value = '';
+  $('#geoModal').classList.add('show');
+});
+function parseLatLon(u) {
+  const pats = [/#map=[\d.]+\/(-?\d+\.\d+)\/(-?\d+\.\d+)/, /@(-?\d+\.\d+),(-?\d+\.\d+)/, /!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/,
+    /[?&](?:q|ll|mlat)=(-?\d+\.\d+)[,&](?:.*mlon=)?(-?\d+\.\d+)/, /(-?\d{1,2}\.\d{4,})\s*,\s*(-?\d{1,3}\.\d{4,})/];
+  for (const p of pats) { const m = u.match(p); if (m) return { lat: +m[1], lon: +m[2] }; }
+  return null;
+}
+$('#geoParse').addEventListener('click', () => {
+  const r = parseLatLon($('#geoUrl').value || '');
+  if (!r || Math.abs(r.lat) > 85 || Math.abs(r.lon) > 180) { $('#geoMsg').textContent = '這段網址裡找不到座標，請改用手動輸入。'; return; }
+  $('#geoLat').value = r.lat.toFixed(6); $('#geoLon').value = r.lon.toFixed(6); $('#geoMsg').textContent = '已讀取座標。';
+});
+$('#geoPreset').addEventListener('change', e => {
+  if (!e.target.value) return;
+  const [la, lo] = e.target.value.split(',');
+  $('#geoLat').value = la; $('#geoLon').value = lo; e.target.value = '';
+});
+$('#geoOk').addEventListener('click', () => {
+  const la = +$('#geoLat').value, lo = +$('#geoLon').value;
+  if (!isFinite(la) || !isFinite(lo) || Math.abs(la) > 85 || Math.abs(lo) > 180) { $('#geoMsg').textContent = '座標格式不正確。'; return; }
+  map.lat = la; map.lon = lo; map.mode = 'osm'; tileOK = 0; tileBad = 0; tiles.clear();
+  syncGeo(); syncMapUI(); scheduleSave();
+  $('#geoModal').classList.remove('show');
+});
 
 /* ------------------------------------------------------------------ */
 /* picking & snapping                                                  */
@@ -197,7 +324,7 @@ function updateHud() {
   const m = {
     select: '<b>選取／移動</b>　點道路或節點查看屬性，拖曳節點可移動，拖曳空白處平移',
     draw: ui.drawing ? '<b>畫路中</b>　點下一點延伸；<b>雙擊／Enter／右鍵</b>結束，Esc 取消，Shift 吸附角度' : '<b>畫路</b>　點一下設定起點（可從既有道路上起畫，會自動形成路口）',
-    signal: '<b>號誌</b>　點擊三向以上的路口，開關號誌',
+    signal: '<b>號誌／圓環</b>　連點三向以上的路口可循環切換：讓行 → 號誌 → 圓環',
     delete: '<b>刪除</b>　點道路刪除該路段；點路口／端點刪除其所有連接道路'
   };
   $('#hud').innerHTML = m[ui.tool];
@@ -212,10 +339,12 @@ function placePoint(p) {
   if (ok) ui.drawing = { x: p.x, y: p.y };
   updateHud();
 }
-function toggleSignal(id) {
+function cycleNode(id) {
   const n = nodeById(id); if (!n) return;
-  if (RS.nodeDegree(net, id) < 3) { toast('號誌只能設在三向以上的路口'); return; }
-  edit(() => { n.sig = n.sig ? null : RS.defaultSig(); });
+  if (RS.nodeDegree(net, id) < 3) { toast('號誌與圓環只能設在三向以上的路口'); return; }
+  const next = n.ring > 0 ? 'plain' : (n.sig ? 'ring' : 'sig');
+  edit(() => { n.sig = next === 'sig' ? RS.defaultSig() : null; n.ring = next === 'ring' ? (n.ring || 14) : 0; });
+  toast(next === 'sig' ? '已設為號誌路口' : (next === 'ring' ? '已設為圓環' : '已改為讓行路口'));
   ui.sel = { type: 'node', id }; renderInspector();
 }
 function deleteSel(s) {
@@ -307,7 +436,7 @@ function clickAt(sx, sy, e) {
     placePoint(snapPoint(w.x, w.y, e.shiftKey));
   } else if (ui.tool === 'signal') {
     const h = pick(w.x, w.y);
-    if (h && h.type === 'node') toggleSignal(h.id);
+    if (h && h.type === 'node') cycleNode(h.id);
     else toast('請點擊三向以上的路口');
   } else if (ui.tool === 'delete') {
     const h = pick(w.x, w.y, true); if (h) { if (ui.sel && ui.sel.type === h.type && ui.sel.id === h.id) ui.sel = null; deleteSel(h); }
@@ -370,9 +499,15 @@ function renderInspector1() {
         const c = RS.compileSig(Object.assign({}, sg));
         prog = '<div class="phase">' + c.ph.map(p => `<span class="${p.group ? 'b' : ''}">${p.group ? 'B' : 'A'} ${p.mv === 'L' ? '左轉專用' : (p.mv === 'R' ? '右轉專用' : '直行' + (p.mv.includes('L') ? '＋左' : '') + (p.mv.includes('R') ? '＋右' : ''))} ${p.dur}s</span>`).join('') + '</div>';
       }
+      const kind = n.ring > 0 ? 'ring' : (sg ? 'sig' : 'plain');
       h = `<div class="card"><h3>路口 #${n.id}</h3>
         <div class="kv"><span>連接道路</span><b>${deg} 條</b></div>
-        <label class="chk"><input type="checkbox" data-act="sig" ${sg ? 'checked' : ''}>啟用號誌</label>
+        <div class="field"><label>路口型態</label><div class="seg" data-act="ntype">
+          ${[['plain', '讓行'], ['sig', '號誌'], ['ring', '圓環']].map(([v, t]) => `<button data-v="${v}" class="${kind === v ? 'on' : ''}">${t}</button>`).join('')}</div></div>
+        ${kind === 'ring' ? `<div class="field"><label>圓環半徑</label><input type="number" data-act="ringR" min="6" max="60" step="1" value="${n.ring}"></div>
+        <div class="kv"><span>環道周長</span><b class="num">${fmt(2 * Math.PI * n.ring, 0)} m</b></div>
+        <div class="hint">車輛逆時針繞行單一環道，進環車輛讓行環內車輛。半徑越大繞行速度越快、容量越高；approach 車道再多，環內仍只有一條車道。</div>` : ''}
+        ${kind === 'plain' ? '<div class="hint">依讓行規則通過：左轉讓直行與右轉、先到先走。</div>' : ''}
         ${sg ? `<label class="chk"><input type="checkbox" data-act="timer" ${sg.timer !== false ? 'checked' : ''}>顯示這個路口的倒數秒數</label>
         <div class="sub">直行綠燈（秒）</div>
         ${num('g0', 'A 軸', 5, 120)}${num('g1', 'B 軸', 5, 120)}
@@ -385,7 +520,7 @@ function renderInspector1() {
         <div class="kv"><span>週期</span><b class="num">${RS.sigCycle(Object.assign({}, sg))} s</b></div>
         <div class="sub">相位順序</div>${prog}
         <div class="hint">A／B 是互相垂直的兩個方向軸，標籤顯示在畫面上各進口道旁。未設專用相位時，左轉在直行綠燈內讓行；設了專用相位，該軸左／右轉只在自己的相位才放行，紅燈（含右轉）一律停等。方向有 2 條以上車道時，最內側車道會成為左轉專用道（右轉專用需再多一條車道），單車道會共用車道。</div>`
-        : '<div class="hint">未啟用號誌：車輛依讓行規則通過（左轉讓直行與右轉、先到先走）。</div>'}
+        : ''}
         <button class="btn danger block" style="margin-top:10px" data-act="delNode">刪除此路口與相連道路</button></div>`;
     }
   }
@@ -394,6 +529,12 @@ function renderInspector1() {
 $('#insp').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b || !ui.sel) return;
   const act = (b.closest('[data-act]') || b).dataset.act;
+  if (act === 'ntype') {
+    const v = b.dataset.v, n = nodeById(ui.sel.id); if (!n) return;
+    if (v === 'ring' && RS.nodeDegree(net, n.id) < 3) { toast('圓環需要三向以上的路口'); return; }
+    edit(() => { n.sig = v === 'sig' ? (n.sig || RS.defaultSig()) : null; n.ring = v === 'ring' ? (n.ring || 14) : 0; });
+    renderInspector(); return;
+  }
   if (act === 'lanes') {
     const v = +b.dataset.v, r = roadById(ui.sel.id); if (!r) return;
     const ids = ui.chain ? chainOf(r.id) : [r.id];
@@ -416,6 +557,8 @@ $('#insp').addEventListener('change', e => {
     edit(() => { n.flow = raw === '' ? null : clamp(+raw || 0, 0, 3000); });
   } else if (act === 'sig') {
     const n = nodeById(ui.sel.id); edit(() => { n.sig = t.checked ? RS.defaultSig() : null; });
+  } else if (act === 'ringR') {
+    const n = nodeById(ui.sel.id); edit(() => { n.ring = clamp(Math.round(+t.value || 14), 6, 60); }); renderInspector();
   } else if (act === 'timer') {
     const n = nodeById(ui.sel.id); edit(() => { n.sig.timer = t.checked; });
   } else if (act === 'sg') {
@@ -428,19 +571,20 @@ $('#insp').addEventListener('change', e => {
 /* global controls                                                     */
 /* ------------------------------------------------------------------ */
 function syncOptUI() {
-  $('#rFlow').value = opt.flow; $('#rTruck').value = opt.truck;
+  $('#rFlow').value = opt.flow; $('#rTruck').value = opt.truck; $('#rMoto').value = opt.moto; $('#hookChk').checked = opt.hook !== false;
   $('#rL').value = opt.wL; $('#rS').value = opt.wS; $('#rR').value = opt.wR; $('#seed').value = opt.seed;
   updateOptLabels();
 }
 function updateOptLabels() {
-  $('#oFlow').textContent = opt.flow; $('#oTruck').textContent = opt.truck + '%';
+  $('#oFlow').textContent = opt.flow; $('#oTruck').textContent = opt.truck + '%'; $('#oMoto').textContent = opt.moto + '%';
   const t = (opt.wL + opt.wS + opt.wR) || 1;
   $('#oL').textContent = Math.round(opt.wL / t * 100) + '%'; $('#oS').textContent = Math.round(opt.wS / t * 100) + '%'; $('#oR').textContent = Math.round(opt.wR / t * 100) + '%';
 }
 function liveOpt() { if (sim) Object.assign(sim.opt, opt); updateOptLabels(); scheduleSave(); }
-[['rFlow', 'flow'], ['rTruck', 'truck'], ['rL', 'wL'], ['rS', 'wS'], ['rR', 'wR']].forEach(([id, k]) => {
+[['rFlow', 'flow'], ['rTruck', 'truck'], ['rMoto', 'moto'], ['rL', 'wL'], ['rS', 'wS'], ['rR', 'wR']].forEach(([id, k]) => {
   $('#' + id).addEventListener('input', e => { opt[k] = +e.target.value; liveOpt(); if (k === 'flow') { const s = ui.sel; if (s && s.type === 'node') { const i = $('#insp [data-act=nflow]'); if (i) i.placeholder = '預設 ' + opt.flow; } } });
 });
+$('#hookChk').addEventListener('change', e => { opt.hook = e.target.checked; liveOpt(); });
 $('#seedBtn').addEventListener('click', () => {
   opt.seed = clamp(Math.round(+$('#seed').value) || 1, 1, 999999); $('#seed').value = opt.seed; commit();
 });
@@ -508,7 +652,7 @@ window.addEventListener('keydown', e => {
 /* ------------------------------------------------------------------ */
 function svMsg(t, bad) { const m = $('#svMsg'); m.textContent = t; m.style.color = bad ? 'var(--bad)' : 'var(--muted)'; }
 $('#saveBtn').addEventListener('click', () => { $('#saveModal').classList.add('show'); $('#svGen').click(); });
-$('#svGen').addEventListener('click', () => { $('#svText').value = JSON.stringify({ v: 1, net, opt }, null, 1); svMsg('已產生目前路網（' + net.roads.length + ' 段道路）。'); });
+$('#svGen').addEventListener('click', () => { $('#svText').value = JSON.stringify({ v: 1, net, opt, map }, null, 1); svMsg('已產生目前路網（' + net.roads.length + ' 段道路）。'); });
 $('#svCopy').addEventListener('click', async () => {
   const ta = $('#svText'); ta.focus(); ta.select();
   try { await navigator.clipboard.writeText(ta.value); svMsg('已複製到剪貼簿。'); }
@@ -527,8 +671,8 @@ $('#svFile').addEventListener('change', e => {
 $('#svCsv').addEventListener('click', () => {
   const rows = ['時間(s),路網車輛,平均車速(km/h),通過量(veh/h),平均延滯(s),待進車輛'];
   for (const p of sim.series) rows.push([p.t.toFixed(0), p.n, p.v.toFixed(1), p.thr.toFixed(0), p.delay.toFixed(1), p.vq].join(','));
-  rows.push(''); rows.push('路口,號誌,流量(veh/h),平均延滯(s),LOS,最大排隊(m),平均排隊(m)');
-  for (const r of sim.nodeTable()) rows.push([r.id, r.signal ? '有' : '無', r.flow.toFixed(0), r.delay.toFixed(1), r.los, r.maxQ.toFixed(0), r.avgQ.toFixed(1)].join(','));
+  rows.push(''); rows.push('路口,型態,流量(veh/h),平均延滯(s),LOS,最大排隊(m),平均排隊(m)');
+  for (const r of sim.nodeTable()) rows.push([r.id, r.ring ? '圓環' : (r.signal ? '號誌' : '讓行'), r.flow.toFixed(0), r.delay.toFixed(1), r.los, r.maxQ.toFixed(0), r.avgQ.toFixed(1)].join(','));
   $('#svText').value = rows.join('\n'); svMsg('已產生指標 CSV，可按「複製」後貼進試算表。');
 });
 
@@ -571,10 +715,19 @@ function drawRoads() {
   ctx.fill();
   ctx.beginPath();
   for (const gn of g.nodes.values()) {
-    if (gn.deg >= 3) { ctx.moveTo(gn.x + gn.R * 0.85, gn.y); ctx.arc(gn.x, gn.y, gn.R * 0.85, 0, 7); }
-    else if (gn.deg === 2) { ctx.moveTo(gn.x + gn.maxLanes * W, gn.y); ctx.arc(gn.x, gn.y, gn.maxLanes * W, 0, 7); }
+    const r = gn.ring ? gn.R : (gn.deg >= 3 ? gn.R * 0.85 : (gn.deg === 2 ? gn.maxLanes * W : 0));
+    if (r > 0) { ctx.moveTo(gn.x + r, gn.y); ctx.arc(gn.x, gn.y, r, 0, 7); }
   }
   ctx.fill();
+  for (const gn of g.nodes.values()) {                       // roundabout island
+    if (!gn.ring) continue;
+    const ri = Math.max(1.5, gn.ring - W * 0.8);
+    ctx.fillStyle = map.mode === 'none' ? COL.bg : 'rgba(228,240,228,.95)';
+    ctx.beginPath(); ctx.arc(gn.x, gn.y, ri, 0, 7); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = 0.35; ctx.stroke();
+    ctx.fillStyle = 'rgba(31,210,122,.5)'; ctx.beginPath(); ctx.arc(gn.x, gn.y, Math.max(0.8, ri - 1.2), 0, 7); ctx.fill();
+    ctx.fillStyle = COL.asphalt;
+  }
   if (ui.overlay !== 'none') {
     if (performance.now() - edgeStT > 200) { edgeSt = sim.edgeStats(); edgeStT = performance.now(); }
     const bins = {};
@@ -612,7 +765,7 @@ function drawMarks() {
     }
     ctx.stroke();
   }
-  if (ui.arrows) drawArrows();
+  if (ui.arrows) { drawArrows(); drawBoxes(); }
   // stop lines (one segment per lane, coloured by that lane's movement)
   ctx.lineCap = 'butt';
   for (const e of g.edges) {
@@ -643,13 +796,29 @@ function arrowPath(mv) {
     head(ex, ey, Math.atan2(sgn * 1.0, 0.55));
   }
 }
+/* motorcycle two-stage left-turn waiting boxes */
+function drawBoxes() {
+  const z = view.z; if (z < 1.2 || !opt.hook) return;
+  ctx.globalAlpha = clamp((z - 1.2) / 0.8, 0, 1) * 0.9;
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 0.3; ctx.setLineDash([1.1, 0.9]);
+  for (const gn of sim.g.nodes.values()) {
+    if (!gn.sig || gn.ring) continue;
+    for (const oe of gn.out) {
+      const l0 = oe.lanes * W - 3.1, l1 = oe.lanes * W - 0.1, f0 = -3.4, f1 = 2.0;
+      const pt = (f, l) => [oe.sx + oe.dx * f + oe.nx * l, oe.sy + oe.dy * f + oe.ny * l];
+      const a = pt(f0, l0), b = pt(f1, l0), c2 = pt(f1, l1), d = pt(f0, l1);
+      ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.lineTo(c2[0], c2[1]); ctx.lineTo(d[0], d[1]); ctx.closePath(); ctx.stroke();
+    }
+  }
+  ctx.setLineDash([]); ctx.globalAlpha = 1;
+}
 function drawArrows() {
   const z = view.z; if (z < 1.3) return;
   const alpha = clamp((z - 1.3) / 1.0, 0, 1);
   const x0 = view.x - cw / 2 / z - 10, x1 = view.x + cw / 2 / z + 10, y0 = view.y - ch / 2 / z - 10, y1 = view.y + ch / 2 / z + 10;
   ctx.globalAlpha = alpha * 0.95; ctx.fillStyle = ctx.strokeStyle = '#fff'; ctx.lineWidth = 0.34; ctx.lineJoin = 'miter'; ctx.lineCap = 'butt';
   for (const e of sim.g.edges) {
-    const gn = e.b; if (gn.deg < 3 || !e.lm || e.len < 24) continue;
+    const gn = e.b; if (gn.deg < 3 || gn.ring || !e.lm || e.len < 24) continue;
     if (Math.max(e.sx, e.ex) < x0 || Math.min(e.sx, e.ex) > x1 || Math.max(e.sy, e.ey) < y0 || Math.min(e.sy, e.ey) > y1) continue;
     const poss = [e.len - 11]; if (e.len > 75 && z > 2.6) poss.push(e.len - 40);
     for (let li = 0; li < e.lanes; li++) {
@@ -669,21 +838,29 @@ function drawVehicles() {
   const dot = z < 0.7;
   for (let i = 0; i < vs.length; i++) {
     const v = vs[i]; let fx, fy, ang;
-    if (v.conn) { const p = RS.connPose(v.conn, v.cs); fx = p.x; fy = p.y; ang = p.ang; }
+    if (v.conn) {
+      const p = RS.connPose(v.conn, v.cs); fx = p.x; fy = p.y; ang = p.ang;
+      if (v.hookWait && v.conn.box) {                       // turned to face the cross street while waiting
+        const tg = v.conn.box.ang;
+        if (v.bang == null) v.bang = ang;
+        v.bang += Math.atan2(Math.sin(tg - v.bang), Math.cos(tg - v.bang)) * 0.12;
+        ang = v.bang;
+      }
+    }
     else { const e = v.e; fx = e.sx + e.dx * v.s + e.nx * v.lat; fy = e.sy + e.dy * v.s + e.ny * v.lat; ang = e.ang; }
     const ca = Math.cos(ang), sa = Math.sin(ang), hl = v.len / 2;
     const mx = fx - ca * hl, my = fy - sa * hl;
     if (mx < cx0 || mx > cx1 || my < cy0 || my > cy1) continue;
-    const key = byType ? (v.type === 'truck' ? 'T' : 'C') : Math.round(clamp(v.v / Math.max(v.e.limit, 1), 0, 1) * 9);
+    const key = byType ? (v.type === 'truck' ? 'T' : (v.moto ? 'M' : 'C')) : Math.round(clamp(v.v / Math.max(v.e.limit, 1), 0, 1) * 9);
     let b = buckets.get(key); if (!b) { b = []; buckets.set(key, b); }
     b.push(mx, my, ca, sa, hl, v.wid / 2);
   }
   buckets.forEach((arr, key) => {
-    ctx.fillStyle = byType ? (key === 'T' ? '#ff9f1c' : '#7c5cff') : SPEED_COL[key];
+    ctx.fillStyle = byType ? (key === 'T' ? '#ff9f1c' : (key === 'M' ? '#ff4d9d' : '#7c5cff')) : SPEED_COL[key];
     ctx.beginPath();
     for (let i = 0; i < arr.length; i += 6) {
       const x = arr[i], y = arr[i + 1], ca = arr[i + 2], sa = arr[i + 3], hl = arr[i + 4], hw = arr[i + 5];
-      if (dot) { const r = Math.max(hl, 1.6 / z); ctx.rect(x - r / 1.5, y - r / 1.5, r * 1.3, r * 1.3); continue; }
+      if (dot) { const r = Math.max(hl, 1.4 / z); ctx.rect(x - r / 1.5, y - r / 1.5, r * 1.3, r * 1.3); continue; }
       const lx = ca * hl, ly = sa * hl, wx = -sa * hw, wy = ca * hw;
       ctx.moveTo(x - lx - wx, y - ly - wy); ctx.lineTo(x + lx - wx, y + ly - wy); ctx.lineTo(x + lx + wx, y + ly + wy); ctx.lineTo(x - lx + wx, y - ly + wy); ctx.closePath();
     }
@@ -759,7 +936,7 @@ function drawLabels() {
     if (sx < -60 || sx > cw + 60 || sy < -60 || sy > ch + 60) continue;
     if (gn.deg >= 3 && view.z > 0.3) {
       const r = byId.get(gn.id), los = r && r.n >= 3 ? r.los : null;
-      pill('#' + gn.id + (gn.sig ? ' 號誌' : '') + (los ? ' · ' + los : ''), sx, sy - gn.R * 0.85 * view.z - 12, '#fffdf6', los ? LOSC[los] : '#6d6788');
+      pill('#' + gn.id + (gn.ring ? ' 圓環' : (gn.sig ? ' 號誌' : '')) + (los ? ' · ' + los : ''), sx, sy - gn.R * 0.85 * view.z - 12, '#fffdf6', los ? LOSC[los] : '#6d6788');
       // countdown / phase tags beside every approach
       if (gn.sig && view.z > 0.45 && ((ui.timer && gn.sig.timer !== false) || gn.id === selId)) {
         const showNum = ui.timer && gn.sig.timer !== false, c = RS.compileSig(gn.sig);
@@ -795,9 +972,9 @@ function drawLabels() {
   }
 }
 function render() {
-  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = COL.bg; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = map.mode === 'none' ? COL.bg : '#f2f1ee'; ctx.fillRect(0, 0, cv.width, cv.height);
   const z = view.z; ctx.setTransform(dpr * z, 0, 0, dpr * z, dpr * (cw / 2 - view.x * z), dpr * (ch / 2 - view.y * z));
-  drawGrid(); drawRoads(); drawMarks(); drawVehicles(); drawOverlays(); drawLabels();
+  drawBase(); if (map.mode === 'none') drawGrid(); drawRoads(); drawMarks(); drawVehicles(); drawOverlays(); drawLabels();
 }
 
 /* ------------------------------------------------------------------ */
@@ -855,7 +1032,7 @@ function updateTable() {
   const sel = ui.sel && ui.sel.type === 'node' ? ui.sel.id : -1;
   $('#nodeTbl').innerHTML = nodeRows.map(r => {
     const lc = r.n >= 3 ? r.los : 'n';
-    return `<tr data-id="${r.id}" class="${r.id === sel ? 'sel' : ''}"><td>#${r.id} ${r.signal ? '號誌' : '無號誌'}</td><td>${fmt(r.flow, 0)}</td><td>${r.n >= 3 ? fmt(r.delay, 1) : '–'}</td><td><span class="los ${lc}">${r.n >= 3 ? r.los : '–'}</span></td><td>${fmt(r.maxQ, 0)}</td></tr>`;
+    return `<tr data-id="${r.id}" class="${r.id === sel ? 'sel' : ''}"><td>#${r.id} ${r.ring ? '圓環' : (r.signal ? '號誌' : '讓行')}</td><td>${fmt(r.flow, 0)}</td><td>${r.n >= 3 ? fmt(r.delay, 1) : '–'}</td><td><span class="los ${lc}">${r.n >= 3 ? r.los : '–'}</span></td><td>${fmt(r.maxQ, 0)}</td></tr>`;
   }).join('');
 }
 $('#nodeTbl').addEventListener('click', e => {
@@ -894,9 +1071,9 @@ function init() {
   let data = null;
   try { const s = localStorage.getItem(STORE); if (s) data = JSON.parse(s); } catch (e) {}
   let ok = false;
-  if (data) { try { const s = sanitize(data); if (s.net.roads.length) { net = s.net; opt = s.opt; ok = true; } } catch (e) {} }
+  if (data) { try { const s = sanitize(data); if (s.net.roads.length) { net = s.net; opt = s.opt; map = s.map; ok = true; } } catch (e) {} }
   if (!ok) net = TEMPLATES.cross();
-  syncOptUI(); resize(); newSim(); fitView(); setTool('select'); renderInspector(); updateButtons();
+  syncGeo(); syncOptUI(); syncMapUI(); resize(); newSim(); fitView(); setTool('select'); renderInspector(); updateButtons();
   new ResizeObserver(() => { resize(); }).observe(cv.parentElement);
   window.addEventListener('resize', resize);
   for (let i = 0; i < 20; i++) sim.step();

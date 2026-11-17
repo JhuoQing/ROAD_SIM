@@ -5,6 +5,7 @@ const W = 3.5;            // lane width (m)
 const DT = 0.1;           // fixed time step (s)
 const TYPES = {
   car:   { key: 'car',   name: '小客車', len: 4.5, wid: 1.9, a: 2.0, b: 2.5, T: 1.2, s0: 2.0, vmax: 36 },
+  moto:  { key: 'moto',  name: '機車',   len: 1.9, wid: 0.72, a: 2.8, b: 3.2, T: 0.8, s0: 1.0, vmax: 17 },
   truck: { key: 'truck', name: '貨車',   len: 12,  wid: 2.5, a: 1.2, b: 2.2, T: 1.5, s0: 3.0, vmax: 22.2 }
 };
 
@@ -19,6 +20,10 @@ function mulberry32(seed) {
   };
 }
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const MOTO_LAT = W * 0.5 - 0.45;        // motorcycles ride near the kerb side of their lane
+function latOf(x, lane) { return ((lane == null ? x.lane : lane) + 0.5) * W + (x.moto ? MOTO_LAT : 0); }
+/* a car ignores a motorcycle squeezing past at the edge of its lane */
+function passable(x, o) { return o.moto && x.type === 'car' && Math.abs(o.lat - x.lat) > 1.05; }
 
 /* ------------------------------------------------------------------ */
 /* Editable network model                                              */
@@ -108,6 +113,7 @@ function defaultSig() { return { g0: 30, g1: 30, lA: 0, lB: 0, rA: 0, rB: 0, y: 
 /* ------------------------------------------------------------------ */
 function laneMovesOf(e, gn) {
   const n = e.lanes, out = [];
+  if (gn.ring) { for (let li = 0; li < n; li++) out.push(e.av); return out; }
   let dedL = false, dedR = false;
   if (gn.sig && gn.deg >= 3) {
     const c = compileSig(gn.sig);
@@ -132,6 +138,7 @@ function buildGraph(net) {
   const g = { nodes: new Map(), edges: [], conns: new Map(), connSeq: 0, sources: [] };
   for (const n of net.nodes) {
     g.nodes.set(n.id, { id: n.id, x: n.x, y: n.y, sig: n.sig ? Object.assign({}, n.sig) : null, flow: n.flow,
+      ring: n.ring > 0 ? clamp(+n.ring, 6, 60) : 0,
       deg: 0, maxLanes: 1, R: 0, in: [], out: [], occ: [], queue: 0,
       stat: { sum: 0, n: 0, flow: 0, maxQ: 0, sumQ: 0, nQ: 0 } });
   }
@@ -141,7 +148,9 @@ function buildGraph(net) {
   }
   for (const gn of g.nodes.values()) {
     gn.R = gn.deg >= 3 ? 6 + W * gn.maxLanes + (gn.deg >= 4 ? 2 : 0) : (gn.deg === 2 ? 3 : 0);
-    if (gn.deg < 3) gn.sig = null;
+    if (gn.deg < 3) { gn.sig = null; gn.ring = 0; }
+    if (gn.ring) { gn.sig = null; gn.R = gn.ring + W * 0.5 + 2.5; }
+    gn.box = {};
   }
   let eid = 0;
   for (const r of net.roads) {
@@ -175,7 +184,7 @@ function buildGraph(net) {
     }
     if (gn.sig && gn.in.length) {
       const ref = gn.in[0].ang;
-      for (const e of gn.in) {
+      for (const e of gn.in.concat(gn.out)) {
         let d = Math.abs(((e.ang - ref) % Math.PI + Math.PI) % Math.PI);
         d = Math.min(d, Math.PI - d);
         e.group = d < Math.PI / 4 ? 0 : 1;
@@ -191,39 +200,90 @@ function mapLane(i, inN, outN, turn) {
   if (turn === 'R') return clamp(outN - 1 - (inN - 1 - i), 0, outN - 1);   // lane 0 = next to centre line, last lane = kerb
   return Math.min(i, outN - 1);
 }
+const TAU = Math.PI * 2;
 
-function getConn(g, e, i, oe, j) {
-  const key = e.id + '.' + i + '>' + oe.id + '.' + j;
-  let c = g.conns.get(key); if (c) return c;
-  const o0 = (i + 0.5) * W, o1 = (j + 0.5) * W;
-  const p0x = e.ex + e.nx * o0, p0y = e.ey + e.ny * o0;
-  const p1x = oe.sx + oe.nx * o1, p1y = oe.sy + oe.ny * o1;
-  const cr = e.dx * oe.dy - e.dy * oe.dx;
-  let cx = (p0x + p1x) / 2, cy = (p0y + p1y) / 2;
-  if (Math.abs(cr) > 1e-3) {
-    const s = ((p1x - p0x) * oe.dy - (p1y - p0y) * oe.dx) / cr;
-    if (s > 0 && s < 80) { cx = p0x + e.dx * s; cy = p0y + e.dy * s; }
+/* ---- path helpers: every connector is a densely sampled polyline with a
+   continuous (unwrapped) heading per sample, so headings interpolate smoothly ---- */
+function bezPts(out, p0, c1, c2, p3, n, skipFirst) {
+  for (let k = skipFirst ? 1 : 0; k <= n; k++) {
+    const t = k / n, u = 1 - t, a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, d = t * t * t;
+    out.push(a * p0[0] + b * c1[0] + c * c2[0] + d * p3[0], a * p0[1] + b * c1[1] + c * c2[1] + d * p3[1]);
   }
-  const n = 12, pts = new Float64Array((n + 1) * 2), cum = new Float64Array(n + 1);
+}
+function mkPath(a) {
+  const n = a.length / 2 - 1, pts = Float64Array.from(a), cum = new Float64Array(n + 1), ang = new Float64Array(n + 1);
+  for (let k = 1; k <= n; k++) cum[k] = cum[k - 1] + Math.hypot(pts[2 * k] - pts[2 * k - 2], pts[2 * k + 1] - pts[2 * k - 1]);
   for (let k = 0; k <= n; k++) {
-    const t = k / n, u = 1 - t;
-    pts[2 * k] = u * u * p0x + 2 * u * t * cx + t * t * p1x;
-    pts[2 * k + 1] = u * u * p0y + 2 * u * t * cy + t * t * p1y;
-    if (k) cum[k] = cum[k - 1] + Math.hypot(pts[2 * k] - pts[2 * k - 2], pts[2 * k + 1] - pts[2 * k - 1]);
+    const p = Math.max(0, k - 1), q = Math.min(n, k + 1);
+    let t = Math.atan2(pts[2 * q + 1] - pts[2 * p + 1], pts[2 * q] - pts[2 * p]);
+    if (k) { const pr = ang[k - 1]; t = pr + Math.atan2(Math.sin(t - pr), Math.cos(t - pr)); }   // unwrap
+    ang[k] = t;
   }
-  const t = e.turns.get(oe.id);
-  const turn = t ? t.type : 'S';
-  c = { id: g.connSeq++, key, e, i, oe, j, pts, cum, n, len: Math.max(0.5, cum[n]), turn, vmax: turn === 'S' ? 99 : (turn === 'R' ? 6.5 : 5.5), conf: new Map() };
+  let kap = 0;
+  for (let k = 1; k < n; k++) { const ds = cum[k + 1] - cum[k - 1]; if (ds > 0.3) kap = Math.max(kap, Math.abs(ang[k + 1] - ang[k - 1]) / ds); }
+  return { pts, cum, ang, n, len: Math.max(0.5, cum[n]), vmax: kap > 1e-4 ? clamp(Math.sqrt(3.4 / kap), 4.2, 99) : 99 };
+}
+
+/* connector key kinds: '' normal, 'h' motorcycle two-stage-left waiting box */
+function getConn(g, e, i, oe, j, hook, slot) {
+  slot = hook ? (slot | 0) : 0;
+  const key = (hook ? 'h' : '') + e.id + '.' + i + '>' + oe.id + '.' + j + (hook ? '#' + slot : '');
+  let c = g.conns.get(key); if (c) return c;
+  const gn = e.b, o0 = (i + 0.5) * W, o1 = (j + 0.5) * W;
+  const p0 = [e.ex + e.nx * o0, e.ey + e.ny * o0];
+  const din = [e.dx, e.dy], dout = [oe.dx, oe.dy];
+  const tt = e.turns.get(oe.id), turn = hook ? 'L' : (tt ? tt.type : 'S');
+  let path, ring = null, box = null;
+  if (hook) {
+    // cross straight through on your own green, then pull into the waiting box at the far right corner
+    const col = slot % 3, row = Math.floor(slot / 3);
+    const lat = oe.lanes * W - 0.6 - col * 0.9, fwd = 1.0 - row * 2.0;
+    const p3 = [oe.sx + oe.nx * lat + oe.dx * fwd, oe.sy + oe.ny * lat + oe.dy * fwd];
+    const k = clamp(Math.hypot(p3[0] - p0[0], p3[1] - p0[1]) * 0.5, 2, 26), a = [], d2 = [din[0], din[1]];
+    bezPts(a, p0, [p0[0] + d2[0] * k, p0[1] + d2[1] * k], [p3[0] - d2[0] * k, p3[1] - d2[1] * k], p3, 14, false);
+    path = mkPath(a); path.vmax = Math.min(path.vmax, 7);
+    box = { x: p3[0], y: p3[1], ang: Math.atan2(dout[1], dout[0]) };
+  } else if (gn.ring) {
+    // roundabout: short entry spline, counter-clockwise ring arc, short exit spline
+    const R = gn.ring, cx = gn.x, cy = gn.y;
+    const p3 = [oe.sx + oe.nx * o1, oe.sy + oe.ny * o1];
+    const rawA = Math.atan2(p0[1] - cy, p0[0] - cx), rawB = Math.atan2(p3[1] - cy, p3[0] - cx);
+    let arc = (rawA - rawB) % TAU; if (arc < 0) arc += TAU; if (arc < 0.25) arc += TAU;   // travel = decreasing angle
+    const DEF = Math.min(0.6, arc * 0.3);              // join and leave the ring tangentially
+    const thA = rawA - DEF, thB = rawB + DEF; arc -= 2 * DEF;
+    const A = [cx + R * Math.cos(thA), cy + R * Math.sin(thA)], B = [cx + R * Math.cos(thB), cy + R * Math.sin(thB)];
+    const tA = [Math.sin(thA), -Math.cos(thA)], tB = [Math.sin(thB), -Math.cos(thB)];
+    const k1 = clamp(Math.hypot(A[0] - p0[0], A[1] - p0[1]) * 0.55, 0.8, 14);
+    const k2 = clamp(Math.hypot(p3[0] - B[0], p3[1] - B[1]) * 0.55, 0.8, 14);
+    const a = [];
+    bezPts(a, p0, [p0[0] + din[0] * k1, p0[1] + din[1] * k1], [A[0] - tA[0] * k1, A[1] - tA[1] * k1], A, 5, false);
+    const m = Math.max(4, Math.round(arc / 0.2));
+    for (let q = 1; q <= m; q++) { const th = thA - arc * q / m; a.push(cx + R * Math.cos(th), cy + R * Math.sin(th)); }
+    bezPts(a, B, [B[0] + tB[0] * k2, B[1] + tB[1] * k2], [p3[0] - dout[0] * k2, p3[1] - dout[1] * k2], p3, 5, true);
+    path = mkPath(a);
+    ring = { R, thA, thB, arc, sA: path.cum[5], sB: path.cum[5 + m] };
+    path.vmax = clamp(Math.sqrt(3.4 * R), 5.5, 12);
+  } else {
+    const p3 = [oe.sx + oe.nx * o1, oe.sy + oe.ny * o1];
+    const k = clamp(Math.hypot(p3[0] - p0[0], p3[1] - p0[1]) * 0.45, 1.5, 40), a = [];
+    bezPts(a, p0, [p0[0] + din[0] * k, p0[1] + din[1] * k], [p3[0] - dout[0] * k, p3[1] - dout[1] * k], p3, 16, false);
+    path = mkPath(a);
+  }
+  c = Object.assign(path, { id: g.connSeq++, key, e, i, oe, j, turn, hook: !!hook, slot, ring, box, conf: new Map() });
   g.conns.set(key, c);
   return c;
 }
+function ringTheta(c, cs) { return c.ring.thA - (cs - c.ring.sA) / c.ring.R; }
+function fwdAng(a, b) { let d = (a - b) % TAU; if (d < 0) d += TAU; return d; }   // angular distance travelled from b to a
+
 function conflictPairs(a, b) {
   let r = a.conf.get(b.id); if (r) return r;
   const out = [];
   const merge = a.oe === b.oe && a.j === b.j;
-  for (let k = 0; k <= a.n; k++) {
-    for (let m = 0; m <= b.n; m++) {
-      if (merge && k >= a.n - 3 && m >= b.n - 3) continue;   // plain merge: handled by car-following
+  const ka = Math.max(1, Math.round(a.n / 16)), kb = Math.max(1, Math.round(b.n / 16));
+  for (let k = 0; k <= a.n; k += ka) {
+    for (let m = 0; m <= b.n; m += kb) {
+      if (merge && a.len - a.cum[k] < 7 && b.len - b.cum[m] < 7) continue;   // plain merge: handled by car-following
       if (Math.hypot(a.pts[2 * k] - b.pts[2 * m], a.pts[2 * k + 1] - b.pts[2 * m + 1]) < 2.6) out.push(k, m);
     }
   }
@@ -234,10 +294,11 @@ function conflictPairs(a, b) {
 function connConflict(a, b) { return a !== b && conflictPairs(a, b).length > 0; }
 function connPose(c, s) {
   s = clamp(s, 0, c.len);
-  let k = 1; while (k < c.n && c.cum[k] < s) k++;
-  const s0 = c.cum[k - 1], s1 = c.cum[k], f = s1 > s0 ? (s - s0) / (s1 - s0) : 0;
-  const x0 = c.pts[2 * k - 2], y0 = c.pts[2 * k - 1], x1 = c.pts[2 * k], y1 = c.pts[2 * k + 1];
-  return { x: x0 + (x1 - x0) * f, y: y0 + (y1 - y0) * f, ang: Math.atan2(y1 - y0, x1 - x0) };
+  const cum = c.cum; let lo = 0, hi = c.n - 1;
+  while (lo < hi) { const m = (lo + hi + 1) >> 1; if (cum[m] <= s) lo = m; else hi = m - 1; }
+  const s0 = cum[lo], s1 = cum[lo + 1], f = s1 > s0 ? (s - s0) / (s1 - s0) : 0;
+  const x0 = c.pts[2 * lo], y0 = c.pts[2 * lo + 1];
+  return { x: x0 + (c.pts[2 * lo + 2] - x0) * f, y: y0 + (c.pts[2 * lo + 3] - y0) * f, ang: c.ang[lo] + (c.ang[lo + 1] - c.ang[lo]) * f };
 }
 
 /* Signal programme: per axis (group 0 = A, 1 = B) an optional left-only phase, the through phase,
@@ -291,7 +352,7 @@ function losOf(delay, signalized) {
 /* ------------------------------------------------------------------ */
 class Sim {
   constructor(net, opt) {
-    this.opt = Object.assign({ flow: 300, truck: 8, wL: 20, wS: 60, wR: 20, seed: 1 }, opt || {});
+    this.opt = Object.assign({ flow: 300, truck: 8, moto: 25, hook: true, wL: 20, wS: 60, wR: 20, seed: 1 }, opt || {});
     this.reset(net);
   }
   reset(net) {
@@ -308,10 +369,18 @@ class Sim {
   gauss() { const u = Math.max(1e-9, this.rng()), v = this.rng(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
 
   makeVeh(type, e, lane, s, v) {
-    const P = TYPES[type];
-    return { id: this.nextId++, type, p: P, len: P.len, wid: P.wid, f: clamp(1 + 0.1 * this.gauss(), 0.8, 1.25),
-      v, a: 0, aReal: 0, vd: 0, e, lane, s, lat: (lane + 0.5) * W, conn: null, cs: 0, next: null, turn: 'S',
+    const P = TYPES[type], moto = type === 'moto';
+    return { id: this.nextId++, type, p: P, len: P.len, wid: P.wid, moto, f: clamp(1 + 0.1 * this.gauss(), 0.8, 1.25),
+      v, a: 0, aReal: 0, vd: 0, e, lane, s, lat: (lane + 0.5) * W + (moto ? MOTO_LAT : 0), conn: null, cs: 0, next: null, turn: 'S',
+      hook: false, slot: 0, hookWait: false, hookT: 0, filt: false,
       t0: this.t, ff: 0, stops: 0, moving: true, waitT: 0, lcT: 0, zoneE: null, zoneT: 0, zoneS: 0, zoneV: 10, permit: true, dead: false };
+  }
+  /* the connector this vehicle would use next */
+  connOf(x) {
+    const e = x.e, oe = x.next; if (!oe) return null;
+    const gn = e.b;
+    const j = gn.ring ? oe.lanes - 1 : mapLane(x.lane, e.lanes, oe.lanes, x.turn);
+    return getConn(this.g, e, x.lane, oe, j, x.hook, x.hook ? (gn.box[oe.id] || 0) : 0);
   }
   chooseNext(x, free) {
     const e = x.e, gn = e.b;
@@ -320,7 +389,9 @@ class Sim {
     const cands = gn.out.filter(oe => oe.id !== e.rev);
     if (!cands.length) return;
     const w = { L: this.opt.wL, S: this.opt.wS, R: this.opt.wR };
-    const lm = e.lm ? e.lm[x.lane] : 'LSR'; const allowed = k => free || lm.includes(k);
+    const hookOK = !!(x.moto && this.opt.hook && gn.sig && !gn.ring);
+    const lm = e.lm ? e.lm[x.lane] : 'LSR';
+    const allowed = k => free || lm.includes(k) || (k === 'L' && hookOK && x.lane === e.lanes - 1);
     const by = { L: [], S: [], R: [] };
     for (const oe of cands) { const k = e.turns.get(oe.id).type; if (allowed(k)) by[k].push(oe); }
     if (!by.L.length && !by.S.length && !by.R.length) for (const oe of cands) by[e.turns.get(oe.id).type].push(oe);
@@ -338,6 +409,8 @@ class Sim {
       if (!pick) pick = by.L.concat(by.S, by.R)[0];
     }
     x.next = pick; x.turn = e.turns.get(pick.id).type;
+    x.hook = hookOK && x.turn === 'L';
+    const c = this.connOf(x); x.cvm = c ? c.vmax : 99;
   }
 
   /* may front vehicle x of its lane pass the stop line now? */
@@ -359,11 +432,24 @@ class Sim {
       }
     }
     x.sigRed = stRed;
-    const j = mapLane(x.lane, e.lanes, oe.lanes, x.turn);
-    const c = getConn(g, e, x.lane, oe, j);
-    // exit space
-    const ol = oe.lanesArr[j];
-    if (ol.length) { const o = ol[0]; if (o.s - o.len < 0.5 && !(forced)) { x.why = 'exit'; return false; } }
+    if (x.hook && (gn.box[oe.id] || 0) >= 9) { if (x.waitT < 25) { x.why = 'boxfull'; return false; } x.hook = false; }
+    const c = this.connOf(x), j = c.j;
+    // exit space (a two-stage left ends in the waiting box, not on the far edge)
+    if (!c.hook) {
+      const ol = oe.lanesArr[j];
+      if (ol.length) { const o = ol[0]; if (o.s - o.len < 0.5 && !(forced)) { x.why = 'exit'; return false; } }
+    }
+    if (gn.ring) {
+      const R = gn.ring, thA = c.ring.thA;
+      const crit = (x.moto ? 2.2 : (x.type === 'truck' ? 3.8 : 3.0)) * (forced ? 0.5 : 1);
+      for (const o of gn.occ) {
+        if (!o.conn.ring) continue;
+        const th = ringTheta(o.conn, o.cs), behind = fwdAng(th, thA);
+        if (R * (TAU - behind) < x.len + 2.4) { x.why = 'ringbusy'; return false; }          // sitting just past the entry
+        if (behind < Math.PI * 1.1 && R * behind / Math.max(o.v, 2.2) < crit) { x.why = 'ringyield'; return false; }
+      }
+      return true;
+    }
     // vehicles in the node
     if (!forced) {
       for (const o of gn.occ) {
@@ -386,7 +472,7 @@ class Sim {
           const L2 = E2.lanesArr[li]; if (!L2.length) continue;
           const y = L2[L2.length - 1];
           const d2 = E2.len - y.s; if (d2 > 60 || !y.next) continue;
-          const c2 = getConn(g, E2, y.lane, y.next, mapLane(y.lane, E2.lanes, y.next.lanes, y.turn));
+          const c2 = this.connOf(y); if (!c2) continue;
           if (!connConflict(c, c2)) continue;
           const tY = d2 / Math.max(y.v, 3);
           if (gn.sig) {
@@ -414,21 +500,24 @@ class Sim {
   }
   tryInsert(gn) {
     const e = gn.out[0];
-    const type = this.rng() * 100 < this.opt.truck ? 'truck' : 'car';
-    const x = this.makeVeh(type, e, 0, type === 'truck' ? 12 : 4.5, 0);
+    const r0 = this.rng() * 100, mo = this.opt.moto || 0;
+    const type = r0 < mo ? 'moto' : (r0 < mo + this.opt.truck ? 'truck' : 'car');
+    const x = this.makeVeh(type, e, 0, 0, 0);
     this.chooseNext(x, true);
     const v0 = Math.min(e.limit * x.f, x.p.vmax);
     const okL = [], rest = [];
     for (let li = 0; li < e.lanes; li++) ((e.lm && e.lm[li].includes(x.turn)) || !e.lm ? okL : rest).push(li);
-    const start = Math.floor(this.rng() * okL.length);
-    const order = okL.slice(start).concat(okL.slice(0, start), rest);
+    let order;
+    if (x.moto) order = okL.slice().reverse().concat(rest.slice().reverse());   // motorcycles keep to the kerb
+    else { const start = Math.floor(this.rng() * Math.max(1, okL.length)); order = okL.slice(start).concat(okL.slice(0, start), rest); }
     for (let q = 0; q < order.length; q++) {
       const li = order[q], L = e.lanesArr[li], o = L.length ? L[0] : null;
       let vInit = v0 * 0.85, gap = Infinity;
       if (o) { gap = o.s - o.len - x.len; vInit = Math.min(vInit, o.v + 3); }
       if (gap >= vInit * 1.1 + 3) {
-        x.lane = li; x.lat = (li + 0.5) * W; x.s = x.len; x.v = vInit;
+        x.lane = li; x.lat = latOf(x, li); x.s = x.len; x.v = vInit;
         if (!(e.lm && e.lm[li].includes(x.turn))) this.chooseNext(x);
+        else { const c0 = this.connOf(x); x.cvm = c0 ? c0.vmax : 99; }
         L.unshift(x); this.vehicles.push(x); this.tot.spawned++;
         return true;
       }
@@ -451,27 +540,46 @@ class Sim {
           const x = L[k], dist = e.len - x.s;
           let v0 = Math.min(e.limit * x.f, x.p.vmax);
           if (gn.deg >= 3 && x.zoneE !== e && dist <= 60) { x.zoneE = e; x.zoneT = t; x.zoneS = x.s; x.zoneV = v0; }
-          if (x.next && x.turn !== 'S') { const vt = x.turn === 'R' ? 6.5 : 5.5; v0 = Math.min(v0, Math.sqrt(vt * vt + 5 * Math.max(0, dist))); }
+          if (x.next && x.cvm < 50) { const vt = x.cvm; v0 = Math.min(v0, Math.sqrt(vt * vt + 5 * Math.max(0, dist))); }
+          let kk = k + 1;
+          while (kk < L.length) {                       // filter past stopped cars (motorcycles) / past a filtering bike (cars)
+            const o = L[kk];
+            if (passable(x, o) || (x.moto && o.type === 'car' && o.v < 2.5 && x.v < 8)) kk++; else break;
+          }
+          x.filt = kk > k + 1 && !passable(x, L[k + 1]);
+          if (x.filt) v0 = Math.min(v0, 6);
           x.vd = v0;
           let gap = Infinity, vl = 0, gapR = Infinity, vlR = 0;
-          if (k + 1 < L.length) { const o = L[k + 1]; gap = o.s - o.len - x.s; vl = o.v; gapR = gap; vlR = vl; }
+          if (kk < L.length) { const o = L[kk]; gap = o.s - o.len - x.s; vl = o.v; gapR = gap; vlR = vl; }
           else if (x.next) {
             const ok = this.mayEnter(x); x.permit = ok;
             if (!ok) { const gg = dist + 1.5; if (gg < gap) { gap = gg; vl = 0; } }
             else {
-              const oe = x.next, j = mapLane(x.lane, e.lanes, oe.lanes, x.turn), c = getConn(g, e, x.lane, oe, j);
+              const c = this.connOf(x), oe = c.oe, j = c.j;
               for (const o of gn.occ) {
+                if (o.hookWait) continue;
                 if (o.conn.e === e && o.conn.i === x.lane) { const gg = dist + o.cs - o.len; if (gg < gap) { gap = gg; vl = o.v; } }
+              }
+              if (gn.ring) {
+                const R = gn.ring, thA = c.ring.thA;
+                for (const o of gn.occ) {
+                  if (!o.conn.ring || o.conn.e === e) continue;
+                  const gg = dist + R * fwdAng(thA, ringTheta(o.conn, o.cs)) - o.len;
+                  if (gg < gap) { gap = gg; vl = o.v; }
+                }
               }
               const myEnd = dist + c.len;
               for (const o of gn.occ) {
+                if (o.hookWait || o.conn.hook) continue;
                 if (o.conn.oe === oe && o.conn.j === j && !(o.conn.e === e && o.conn.i === x.lane)) {
                   const doEnd = o.conn.len - o.cs;
                   if (doEnd < myEnd) { const gg = myEnd - doEnd - o.len; if (gg < gap) { gap = gg; vl = o.v; } }
                 }
               }
-              const ol = oe.lanesArr[j];
-              if (ol.length) { const o = ol[0], gg = dist + c.len + o.s - o.len; if (gg < gap) { gap = gg; vl = o.v; } }
+              if (!c.hook) {
+                const ol = oe.lanesArr[j];
+                if (ol.length) { const o = ol[0], gg = dist + c.len + o.s - o.len; if (gg < gap) { gap = gg; vl = o.v; } }
+              }
             }
             if (x.v < 0.3 && dist < 8 && !x.sigRed) x.waitT += DT; else if (!(x.v < 0.3)) x.waitT = 0;
           }
@@ -483,20 +591,33 @@ class Sim {
     for (const gn of g.nodes.values()) {
       for (const x of gn.occ) {
         const c = x.conn;
+        if (x.hookWait) { x.a = x.aReal = 0; x.v = 0; x.vd = 0; continue; }
         const v0 = Math.min(c.oe.limit * x.f, x.p.vmax, c.vmax);
         let gap = Infinity, vl = 0;
-        for (const o of gn.occ) {
-          if (o !== x && o.conn === c && o.cs > x.cs) { const gg = o.cs - o.len - x.cs; if (gg < gap) { gap = gg; vl = o.v; } }
-        }
         const dxEnd = c.len - x.cs;
-        for (const o of gn.occ) {
-          if (o.conn !== c && o.conn.oe === c.oe && o.conn.j === c.j) {
-            const doEnd = o.conn.len - o.cs;
-            if (doEnd < dxEnd) { const gg = dxEnd - doEnd - o.len; if (gg < gap) { gap = gg; vl = o.v; } }
+        if (gn.ring) {                                   // one circulating lane: follow by ring angle
+          const th = ringTheta(c, x.cs), R = gn.ring;
+          for (const o of gn.occ) {
+            if (o === x || !o.conn.ring) continue;
+            const gg = R * fwdAng(th, ringTheta(o.conn, o.cs)) - o.len;
+            if (gg < gap) { gap = gg; vl = o.v; }
+          }
+        } else {
+          for (const o of gn.occ) {
+            if (o !== x && o.conn === c && o.cs > x.cs) { const gg = o.cs - o.len - x.cs; if (gg < gap) { gap = gg; vl = o.v; } }
+          }
+          for (const o of gn.occ) {
+            if (o.hookWait || o.conn.hook || o.conn === c) continue;
+            if (o.conn.oe === c.oe && o.conn.j === c.j) {
+              const doEnd = o.conn.len - o.cs;
+              if (doEnd < dxEnd) { const gg = dxEnd - doEnd - o.len; if (gg < gap) { gap = gg; vl = o.v; } }
+            }
           }
         }
-        const ol = c.oe.lanesArr[c.j];
-        if (ol.length) { const o = ol[0], gg = dxEnd + o.s - o.len; if (gg < gap) { gap = gg; vl = o.v; } }
+        if (!c.hook) {
+          const ol = c.oe.lanesArr[c.j];
+          if (ol.length) { const o = ol[0], gg = dxEnd + o.s - o.len; if (gg < gap) { gap = gg; vl = o.v; } }
+        }
         x.vd = v0;
         x.a = x.aReal = idmAcc(x.p, x.v, v0, gap, x.v - vl);
       }
@@ -528,6 +649,7 @@ class Sim {
             if (tl > maxLane) continue;
             if (x.next && e.lm && !e.lm[tl].includes(x.turn)) continue;
             const T = e.lanesArr[tl], nb = this.neighbors(T, x.s);
+            if (nb.lead && passable(x, nb.lead)) continue;
             const gapL = nb.lead ? nb.lead.s - nb.lead.len - x.s : Infinity;
             const gapF = nb.fol ? x.s - x.len - nb.fol.s : Infinity;
             if (gapL < 2 + 0.3 * Math.max(0, nb.lead ? x.v - nb.lead.v : 0)) continue;
@@ -545,7 +667,7 @@ class Sim {
               const after = idmAcc(oldFol.p, oldFol.v, oldFol.vd, oldLead ? oldLead.s - oldLead.len - oldFol.s : Infinity, oldLead ? oldFol.v - oldLead.v : 0);
               dF += after - before;
             }
-            let inc = (aNew - x.aReal) + 0.3 * dF + (dir < 0 ? 0.1 : 0);
+            let inc = (aNew - x.aReal) + 0.3 * dF + (dir < 0 ? 0.1 : 0) + (x.moto && dir > 0 ? 0.45 : 0);
             if (li > maxLane) inc += 4;
             if (inc > bestInc) { bestInc = inc; best = tl; }
           }
@@ -570,6 +692,7 @@ class Sim {
   move() {
     const dt = DT, t = this.t;
     for (const x of this.vehicles) {
+      if (x.hookWait) { x.v = 0; continue; }
       const v0 = x.v; let nv = v0 + x.a * dt, ds;
       if (nv < 0) { nv = 0; ds = x.a < 0 ? v0 * v0 / (2 * -x.a) : 0; } else ds = v0 * dt + 0.5 * x.a * dt * dt;
       x.v = nv;
@@ -579,13 +702,14 @@ class Sim {
         x.cs += ds;
       } else {
         x.s += ds;
-        x.lat += ((x.lane + 0.5) * W - x.lat) * Math.min(1, dt * 3);
+        x.lat += (latOf(x) - x.lat) * Math.min(1, dt * 3);
       }
     }
     for (const x of this.vehicles) {
       if (x.dead) continue;
       if (x.conn) {
         const c = x.conn;
+        if (c.hook && x.cs >= c.len) { x.cs = c.len; x.v = 0; if (!x.hookWait) { x.hookWait = true; x.hookT = t; } continue; }
         if (x.cs >= c.len) {
           const gn = c.e.b, oe = c.oe, i = gn.occ.indexOf(x); if (i >= 0) gn.occ.splice(i, 1);
           x.conn = null; x.e = oe; x.lane = c.j; x.s = x.cs - c.len; x.lat = (c.j + 0.5) * W;
@@ -599,7 +723,7 @@ class Sim {
         if (x.s >= e.len) {
           if (!x.next) { this.exitVeh(x); continue; }
           if (!this.mayEnter(x)) { x.s = e.len; x.v = 0; continue; }
-          const gn = e.b, oe = x.next, j = mapLane(x.lane, e.lanes, oe.lanes, x.turn), c = getConn(this.g, e, x.lane, oe, j);
+          const gn = e.b, c = this.connOf(x), oe = c.oe;
           if (gn.deg >= 3 && x.zoneE === e) {
             const free = (e.len - x.zoneS) / Math.max(3, x.zoneV);
             gn.stat.sum += Math.max(0, (t - x.zoneT) - free); gn.stat.n++;
@@ -607,10 +731,32 @@ class Sim {
           gn.stat.flow++;
           const L = e.lanesArr[x.lane], i = L.indexOf(x); if (i >= 0) L.splice(i, 1);
           x.conn = c; x.cs = x.s - e.len; gn.occ.push(x);
+          if (c.hook) gn.box[oe.id] = (gn.box[oe.id] || 0) + 1;
         }
       }
     }
     if (this.vehicles.some(x => x.dead)) this.vehicles = this.vehicles.filter(x => !x.dead);
+  }
+
+  /* second stage of a motorcycle two-stage left turn */
+  releaseBoxes() {
+    for (const gn of this.g.nodes.values()) {
+      for (let q = gn.occ.length - 1; q >= 0; q--) {
+        const x = gn.occ[q]; if (!x.hookWait) continue;
+        const oe = x.conn.oe;
+        if (gn.sig && sigState(gn.sig, oe.group, 'S', this.t) !== 'G') continue;
+        const li = oe.lanes - 1, L = oe.lanesArr[li];
+        if (L.length && L[0].s - L[0].len < x.len + 2.5) continue;
+        gn.occ.splice(q, 1);
+        gn.box[oe.id] = Math.max(0, (gn.box[oe.id] || 1) - 1);
+        gn.stat.sum += this.t - x.hookT;                 // the wait counts as control delay
+        x.conn = null; x.hookWait = false; x.hook = false; x.e = oe; x.lane = li; x.s = x.len; x.v = 0;
+        x.lat = latOf(x); x.zoneE = null; x.waitT = 0; x.moving = false;
+        let pIdx = L.length; while (pIdx > 0 && L[pIdx - 1].s > x.s) pIdx--;
+        L.splice(pIdx, 0, x);
+        this.chooseNext(x);
+      }
+    }
   }
 
   sampleQueues() {
@@ -644,6 +790,7 @@ class Sim {
   step() {
     this.t += DT; this.k++;
     this.spawn(DT);
+    this.releaseBoxes();
     this.accel();
     this.lanes();
     this.move();
@@ -660,7 +807,7 @@ class Sim {
     for (const gn of this.g.nodes.values()) {
       if (gn.deg < 3) continue;
       const s = gn.stat, d = s.n ? s.sum / s.n : 0;
-      out.push({ id: gn.id, signal: !!gn.sig, n: s.n, flow: this.t > 5 ? s.flow / this.t * 3600 : 0, delay: d, los: s.n ? losOf(d, !!gn.sig) : '–', maxQ: s.maxQ, avgQ: s.nQ ? s.sumQ / s.nQ : 0 });
+      out.push({ id: gn.id, signal: !!gn.sig, ring: !!gn.ring, n: s.n, flow: this.t > 5 ? s.flow / this.t * 3600 : 0, delay: d, los: s.n ? losOf(d, !!gn.sig) : '–', maxQ: s.maxQ, avgQ: s.nQ ? s.sumQ / s.nQ : 0 });
     }
     return out;
   }
@@ -674,6 +821,6 @@ class Sim {
 }
 
 const api = { W, DT, TYPES, Sim, createNet, addNode, addSegment, deleteRoad, deleteNode, nodeDegree, defaultSig, N,
-  nearNode, projectOnRoad, nodeAtOrSplit, splitRoad, buildGraph, sigState, sigInfo, sigCycle, compileSig, losOf, connPose, getConn, mapLane, mulberry32, pruneNodes };
+  nearNode, projectOnRoad, latOf, ringTheta, nodeAtOrSplit, splitRoad, buildGraph, sigState, sigInfo, sigCycle, compileSig, losOf, connPose, getConn, mapLane, mulberry32, pruneNodes };
 if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.RS = api;
 })(typeof self !== 'undefined' ? self : this);
